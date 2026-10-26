@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Telegram NFT Smart Money Alert Bot</title>
+    <meta name="description" content="Production-ready Telegram bot and management dashboard tracking smart money NFT mints and purchases across chains using OpenSea API v2 and SQLite." />
+    <meta property="og:title" content="Telegram NFT Smart Money Alert Bot" />
+    <meta property="og:description" content="Production-ready Telegram bot and management dashboard tracking smart money NFT mints and purchases across chains using OpenSea API v2 and SQLite." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Per AI Studio runtime constraints: HMR is disabled, ignore WebSocket errors
+      (function() {
+        if (typeof window !== 'undefined') {
+          window.addEventListener('unhandledrejection', function(event) {
+            var msg = event?.reason?.message || String(event?.reason || '');
+            var stack = event?.reason?.stack || '';
+            if (msg.includes('WebSocket') || stack.includes('@vite/client') || msg.includes('vite') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          });
+          window.addEventListener('error', function(event) {
+            var msg = event?.message || '';
+            var file = event?.filename || '';
+            if (msg.includes('WebSocket') || file.includes('@vite/client') || msg.includes('Load failed') || msg.includes('Failed to fetch')) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          });
+
+          if (typeof window.WebSocket !== 'undefined') {
+            var RealWebSocket = window.WebSocket;
+            window.WebSocket = function(url, protocols) {
+              if (protocols === 'vite-hmr' || (typeof url === 'string' && (url.includes('vite') || url.includes('24678')))) {
+                var fake = new EventTarget();
+                fake.binaryType = 'blob';
+                fake.readyState = 1;
+                fake.bufferedAmount = 0;
+                fake.send = function() {};
+                fake.close = function() {};
+                setTimeout(function() {
+                  fake.dispatchEvent(new Event('open'));
+                }, 0);
+                return fake;
+              }
+              return new RealWebSocket(url, protocols);
+            };
+            window.WebSocket.prototype = RealWebSocket.prototype;
+          }
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

@@ -1,0 +1,6 @@
+{
+  "name": "Telegram NFT Smart Money Alert Bot",
+  "description": "Production-ready Telegram bot and management dashboard tracking smart money NFT mints and purchases across chains using OpenSea API v2 and SQLite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
