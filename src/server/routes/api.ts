@@ -24,6 +24,7 @@ import { validateWalletAddress } from '../services/walletValidation.ts';
 import { openseaService } from '../services/openseaService.ts';
 import { alertConsolidator } from '../services/alertConsolidator.ts';
 import { simulateTelegramMessage, broadcastTelegramAlert, getAdminIds } from '../telegram/bot.ts';
+import { monitorService } from '../services/monitorService.ts';
 import { runAllTests } from '../../../test/run_all_tests.ts';
 import { generateProjectZip } from '../../../scripts/create_zip.ts';
 import { NFTEvent } from '../../types.ts';
@@ -332,6 +333,21 @@ apiRouter.get('/logs', (req: Request, res: Response) => {
   try {
     const logs = getRecentLogs(50);
     res.json(logs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update Polling Interval dynamically
+apiRouter.post('/settings/interval', (req: Request, res: Response) => {
+  try {
+    const { intervalSeconds } = req.body;
+    const sec = parseInt(intervalSeconds, 10);
+    if (isNaN(sec) || sec < 5) {
+      return res.status(400).json({ error: 'Interval must be a number of at least 5 seconds' });
+    }
+    const updated = monitorService.setIntervalSeconds(sec);
+    res.json({ success: true, pollIntervalSeconds: updated });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

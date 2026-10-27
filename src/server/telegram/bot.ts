@@ -167,7 +167,7 @@ export function buildRecentAlertsMessage(type: 'mint' | 'buy'): string {
 
 export function buildSettingsMessage(): string {
   const adminIds = getAdminIds();
-  const pollInterval = process.env.POLL_INTERVAL_SECONDS || '30';
+  const pollInterval = process.env.POLL_INTERVAL_SECONDS ? (Number(process.env.POLL_INTERVAL_SECONDS) >= 1000 ? Math.round(Number(process.env.POLL_INTERVAL_SECONDS) / 1000) : process.env.POLL_INTERVAL_SECONDS) : '10';
   const hasToken = Boolean(process.env.TELEGRAM_BOT_TOKEN && !process.env.TELEGRAM_BOT_TOKEN.includes('example'));
   const hasApiKey = Boolean(process.env.OPENSEA_API_KEY && !process.env.OPENSEA_API_KEY.includes('your_'));
   const dbPath = process.env.DATABASE_PATH || './data/nft_bot.sqlite';

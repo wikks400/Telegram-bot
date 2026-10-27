@@ -15,7 +15,11 @@ let dbInstance: DatabaseSync | null = null;
 let currentDbPath: string = '';
 
 export function getDatabasePath(): string {
-  return process.env.DATABASE_PATH || './data/nft_bot.sqlite';
+  const envPath = process.env.DATABASE_PATH;
+  if (!envPath || /^\d+$/.test(envPath.trim())) {
+    return './data/nft_bot.sqlite';
+  }
+  return envPath;
 }
 
 export function initDatabase(dbPath?: string): DatabaseSync {
@@ -750,7 +754,7 @@ export function getDashboardStats(db = initDatabase()): DashboardStats {
     uniqueBuyersCount: Number(salesStats.unique_buyers || 0),
     nftsPurchasedCount: Number(salesStats.total_nfts || 0),
     isMonitoring: true,
-    pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS || 30),
+    pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ? (Number(process.env.POLL_INTERVAL_SECONDS) >= 1000 ? Math.round(Number(process.env.POLL_INTERVAL_SECONDS) / 1000) : process.env.POLL_INTERVAL_SECONDS) : 10),
     recentErrors: errors,
     botStatus: {
       tokenConfigured,

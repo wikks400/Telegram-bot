@@ -10,7 +10,8 @@ async function bootstrap() {
   console.log('🤖 Starting Telegram NFT Smart Money Alert Bot...');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const dbPath = process.env.DATABASE_PATH || './data/nft_bot.sqlite';
+  const rawDb = process.env.DATABASE_PATH;
+  const dbPath = (rawDb && !/^\d+$/.test(rawDb.trim())) ? rawDb : './data/nft_bot.sqlite';
   console.log(`📁 Initializing persistent SQLite database at: ${dbPath}`);
   initDatabase(dbPath);
 

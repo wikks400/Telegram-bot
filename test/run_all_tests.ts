@@ -21,6 +21,7 @@ import {
 import { validateWalletAddress } from '../src/server/services/walletValidation.ts';
 import { OpenSeaService } from '../src/server/services/openseaService.ts';
 import { AlertConsolidator } from '../src/server/services/alertConsolidator.ts';
+import { getPollIntervalSeconds, monitorService } from '../src/server/services/monitorService.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -553,6 +554,25 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
       db
     );
     if (!wMulti) throw new Error('addWallet failed with address in groupIds');
+  });
+
+  // 18. Polling Interval Configuration (10s target)
+  await record('Configuring and validating 10-second polling interval', 'Monitoring', () => {
+    // Check helper parsing & normalization
+    const intervalSec = getPollIntervalSeconds();
+    if (intervalSec !== 10 && intervalSec < 5) {
+      throw new Error(`Expected poll interval to be normalized to >= 5s, got ${intervalSec}`);
+    }
+
+    // Check dynamic interval update
+    const updated = monitorService.setIntervalSeconds(10);
+    if (updated !== 10) {
+      throw new Error(`Expected updated interval to be 10, got ${updated}`);
+    }
+
+    if (monitorService.getStatus().pollIntervalMs !== 10000) {
+      throw new Error(`Expected pollIntervalMs to be 10000ms, got ${monitorService.getStatus().pollIntervalMs}`);
+    }
   });
 
   // Clean up test db file

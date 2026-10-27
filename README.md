@@ -89,7 +89,7 @@ Chains are discovered dynamically using the official endpoint:
 
 ### Known OpenSea API Limitations & Safeguards:
 1. **Rate Limits (HTTP 429)**: Free/public OpenSea tiers enforce request limits. The service handles rate limits with exponential backoff and automatically respects the `Retry-After` header.
-2. **Account Events Latency**: OpenSea indexes on-chain transactions with a 15–45 second delay. The polling cycle is configured to 30 seconds by default (`POLL_INTERVAL_SECONDS`).
+2. **Account Events Latency**: OpenSea indexes on-chain transactions with a 15–45 second delay. The polling cycle is configured to 10 seconds by default (`POLL_INTERVAL_SECONDS=10`).
 3. **Missing Social Metadata**: If a collection has not linked Twitter, Discord, or Website on OpenSea, the bot gracefully falls back to `🌐 Socials: None listed` without failing alert delivery.
 
 ---
@@ -114,8 +114,8 @@ OPENSEA_API_KEY=your_opensea_api_key_here
 # Persistent SQLite database location on Botkeep persistent storage
 DATABASE_PATH=/data/nft_bot.sqlite
 
-# Polling frequency in seconds (default: 30)
-POLL_INTERVAL_SECONDS=30
+# Polling frequency in seconds (default: 10)
+POLL_INTERVAL_SECONDS=10
 ```
 
 ### Step 2: Persistent Volume Mount

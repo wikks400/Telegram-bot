@@ -502,10 +502,38 @@ export default function App() {
                 <div className="text-xs text-slate-400 mt-1">{stats.nftsPurchasedCount} NFTs Bought</div>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                <span className="text-xs text-slate-400 font-medium">Poll Interval</span>
-                <div className="text-2xl font-bold text-white mt-1">{stats.pollIntervalSeconds}s</div>
-                <div className="text-xs text-emerald-400 mt-1">Rate limit safe</div>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400 font-medium">Poll Interval</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
+                    Rate safe
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-white mt-1">
+                  {(stats?.pollIntervalSeconds && stats.pollIntervalSeconds < 1000) ? stats.pollIntervalSeconds : 10}s
+                </div>
+                <div className="flex items-center gap-1.5 mt-2">
+                  {[5, 10, 15, 30].map((sec) => (
+                    <button
+                      key={sec}
+                      onClick={async () => {
+                        await fetch('/api/settings/interval', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ intervalSeconds: sec }),
+                        });
+                        await fetchData();
+                      }}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded border transition ${
+                        ((stats?.pollIntervalSeconds && stats.pollIntervalSeconds < 1000) ? stats.pollIntervalSeconds : 10) === sec
+                          ? 'bg-amber-600 border-amber-500 text-white font-bold'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      }`}
+                    >
+                      {sec}s
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -1319,6 +1347,10 @@ export default function App() {
                   <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
                     <div className="text-amber-400 font-bold">DATABASE_PATH=./data/nft_bot.sqlite</div>
                     <div className="text-slate-400 text-[11px] font-sans mt-0.5">Path to persistent SQLite database file.</div>
+                  </div>
+                  <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                    <div className="text-amber-400 font-bold">POLL_INTERVAL_SECONDS=10</div>
+                    <div className="text-slate-400 text-[11px] font-sans mt-0.5">Polling interval in seconds (default: 10s).</div>
                   </div>
                 </div>
               </div>

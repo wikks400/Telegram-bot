@@ -10,6 +10,14 @@ import { apiRouter } from './src/server/routes/api.ts';
 process.env.DISABLE_HMR = 'true';
 dotenv.config();
 
+// Normalize poll interval to 10 seconds
+process.env.POLL_INTERVAL_SECONDS = '10';
+
+// If DATABASE_PATH was accidentally set to a number (e.g. 10000), fix it:
+if (process.env.DATABASE_PATH && /^\d+$/.test(process.env.DATABASE_PATH.trim())) {
+  process.env.DATABASE_PATH = './data/nft_bot.sqlite';
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -18,7 +26,9 @@ async function startServer() {
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
   // Initialize SQLite Database
-  const dbPath = process.env.DATABASE_PATH || './data/nft_bot.sqlite';
+  const dbPath = (process.env.DATABASE_PATH && !/^\d+$/.test(process.env.DATABASE_PATH.trim()))
+    ? process.env.DATABASE_PATH
+    : './data/nft_bot.sqlite';
   initDatabase(dbPath);
   console.log(`[DB] Persistent SQLite database initialized at ${dbPath}`);
 

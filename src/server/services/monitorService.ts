@@ -10,16 +10,41 @@ import { alertConsolidator } from './alertConsolidator.ts';
 import { broadcastTelegramAlert } from '../telegram/bot.ts';
 import { CollectionMetadata, NFTEvent } from '../../types.ts';
 
+export function getPollIntervalSeconds(): number {
+  const envVal = process.env.POLL_INTERVAL_SECONDS;
+  if (!envVal) return 10;
+  let num = parseInt(envVal, 10);
+  if (isNaN(num) || num <= 0) return 10;
+  if (num >= 1000) {
+    num = Math.round(num / 1000);
+  }
+  return num;
+}
+
 export class MonitorService {
   private isRunning: boolean = false;
   private timer: NodeJS.Timeout | null = null;
   private bot: Telegraf | null = null;
-  private pollIntervalMs: number = 30000;
+  private pollIntervalMs: number = 10000;
   private lastPollTimestamp: number = Date.now() - 60000;
 
   constructor() {
-    const sec = parseInt(process.env.POLL_INTERVAL_SECONDS || '30', 10);
-    this.pollIntervalMs = isNaN(sec) ? 30000 : Math.max(5000, sec * 1000);
+    const sec = getPollIntervalSeconds();
+    this.pollIntervalMs = Math.max(5000, sec * 1000);
+  }
+
+  public setIntervalSeconds(seconds: number): number {
+    const safeSec = Math.max(5, seconds);
+    this.pollIntervalMs = safeSec * 1000;
+    process.env.POLL_INTERVAL_SECONDS = String(safeSec);
+    if (this.isRunning && this.timer) {
+      clearInterval(this.timer);
+      this.timer = setInterval(() => {
+        this.runPollCycle();
+      }, this.pollIntervalMs);
+    }
+    addLog('info', 'monitor', `Poll interval updated to ${safeSec}s`);
+    return safeSec;
   }
 
   public setBot(bot: Telegraf | null) {
