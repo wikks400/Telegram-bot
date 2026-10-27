@@ -22,6 +22,7 @@ export async function generateProjectZip(outputPath: string = './telegram-nft-sm
     // Root configuration & documentation files
     const rootFiles = [
       'package.json',
+      'package-lock.json',
       'tsconfig.json',
       'vite.config.ts',
       'index.html',

@@ -20,6 +20,8 @@ import {
   getAchievedMilestones,
   recordMilestoneAlerted,
   ALERT_THRESHOLDS,
+  exportWalletsBackup,
+  restoreWalletsFromBackup,
   closeDatabase,
 } from '../src/server/database/db.ts';
 import { validateWalletAddress } from '../src/server/services/walletValidation.ts';
@@ -710,6 +712,37 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
     if (unnotified.eligibleMilestones.length !== 1 || unnotified.eligibleMilestones[0] !== 3) {
       throw new Error(`Expected milestone 3 to be available again after reset, got ${JSON.stringify(unnotified.eligibleMilestones)}`);
     }
+  });
+
+  // 21. Persistent Backup & Auto-Recovery (VPS power-off / container recreation protection)
+  await record('Persistent wallet backup export and auto-restore on database re-mount', 'VPS Persistence', () => {
+    // 1. Add sample wallets and groups
+    const g = createGroup('Persistence Test Group', 'Test Desc', db);
+    const testAddr = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+    addWallet(testAddr, 'Persistence Wallet', 'evm', [g.id], db);
+
+    // 2. Export backup
+    const backup = exportWalletsBackup(db);
+    if (!backup.wallets.some((w) => w.address === testAddr)) {
+      throw new Error('Exported backup missing test wallet');
+    }
+    if (!backup.groups.some((grp) => grp.id === g.id)) {
+      throw new Error('Exported backup missing test group');
+    }
+
+    // 3. Simulate VPS restart with clean/wiped database
+    clearAllWallets(db);
+    const wipedWallets = getAllWallets(db);
+    if (wipedWallets.length !== 0) throw new Error('Expected 0 wallets after simulated wipe');
+
+    // 4. Restore from backup
+    const restored = restoreWalletsFromBackup(backup, db);
+    if (restored.restoredWallets < 1) throw new Error('Failed to restore wallet from backup');
+
+    const recoveredWallets = getAllWallets(db);
+    const found = recoveredWallets.find((w) => w.address === testAddr);
+    if (!found) throw new Error('Restored wallet not found in database');
+    if (!found.groups?.includes(g.id)) throw new Error('Restored wallet missing group membership');
   });
 
   // Clean up test db file

@@ -355,6 +355,39 @@ export default function App() {
     }
   };
 
+  // Export wallets backup
+  const handleExportBackup = () => {
+    window.open('/api/wallets/backup', '_blank');
+  };
+
+  // Restore wallets from backup
+  const handleRestoreBackup = async (e?: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e?.target?.files?.[0];
+    setLoading(true);
+    try {
+      let res;
+      if (file) {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        res = await fetch('/api/wallets/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await fetch('/api/wallets/restore', { method: 'POST' });
+      }
+      const data = await res.json();
+      await fetchData();
+      setAlertFeedback(data.message || `Wallets successfully restored!`);
+    } catch (err: any) {
+      setAlertFeedback(`Restore failed: ${err.message}`);
+    } finally {
+      setLoading(false);
+      setTimeout(() => setAlertFeedback(null), 5000);
+    }
+  };
+
   // Add group
   const handleAddGroup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1048,6 +1081,43 @@ export default function App() {
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                   Thresholds: 3 → 6 → 10 → 15
                 </span>
+              </div>
+            </div>
+
+            {/* VPS Persistence Protection Banner */}
+            <div className="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-800/40 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold">
+                  🛡️
+                </div>
+                <div>
+                  <div className="text-white font-semibold flex items-center gap-2">
+                    VPS Persistence & Power-Cut Protection Active
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Auto-Synced</span>
+                  </div>
+                  <div className="text-slate-400 text-[11px] mt-0.5">
+                    Tracked wallets are saved with SQLite WAL journaling and mirrored to <code className="text-emerald-300 bg-slate-950 px-1 py-0.2 rounded">wallets_backup.json</code>. If Botkeep or your VPS turns off or restarts, wallets auto-restore on boot.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={handleExportBackup}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 font-medium flex items-center gap-1.5 transition"
+                  title="Download a JSON backup of your tracked wallets to your device"
+                >
+                  <Download className="w-3.5 h-3.5" /> Export Backup
+                </button>
+                <label className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-medium flex items-center gap-1.5 transition cursor-pointer">
+                  <RefreshCw className="w-3.5 h-3.5" /> Restore Backup
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleRestoreBackup}
+                    className="hidden"
+                  />
+                </label>
               </div>
             </div>
 

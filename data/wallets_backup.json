@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "exportedAt": 1793098271778,
+  "groups": [
+    {
+      "id": "grp_alpha",
+      "name": "Alpha",
+      "description": "Top performing NFT traders and early discoverers"
+    },
+    {
+      "id": "grp_smart_money",
+      "name": "Smart Money",
+      "description": "Algorithmic snipers and consistently profitable collectors"
+    },
+    {
+      "id": "grp_whales",
+      "name": "Whales",
+      "description": "High-volume high-capital liquidity holders"
+    },
+    {
+      "id": "grp_1793098271740_4xx3k",
+      "name": "Test Group A",
+      "description": "Group A"
+    },
+    {
+      "id": "grp_1793098271740_qh73t",
+      "name": "Test Group B",
+      "description": "Group B"
+    },
+    {
+      "id": "grp_1793098271742_doqig",
+      "name": "Preserve G1",
+      "description": ""
+    },
+    {
+      "id": "grp_1793098271743_3pnzc",
+      "name": "Preserve G2",
+      "description": ""
+    },
+    {
+      "id": "grp_1793098271750_iwj15",
+      "name": "Stats Alpha",
+      "description": ""
+    },
+    {
+      "id": "grp_1793098271751_sibuv",
+      "name": "Stats Whales",
+      "description": ""
+    },
+    {
+      "id": "grp_1793098271765_9gujn",
+      "name": "Bulk Alpha",
+      "description": "Bulk testing"
+    },
+    {
+      "id": "grp_1793098271776_f7kgr",
+      "name": "Persistence Test Group",
+      "description": "Test Desc"
+    }
+  ],
+  "wallets": [
+    {
+      "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "label": "Persistence Wallet",
+      "chain_type": "evm",
+      "groups": [
+        "grp_1793098271776_f7kgr"
+      ]
+    },
+    {
+      "address": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "label": "Multi Accidental",
+      "chain_type": "evm",
+      "groups": []
+    },
+    {
+      "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "label": "Wallet_0xaaaa",
+      "chain_type": "evm",
+      "groups": [
+        "grp_alpha"
+      ]
+    },
+    {
+      "address": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "label": "Wallet_0xbbbb",
+      "chain_type": "evm",
+      "groups": [
+        "grp_alpha"
+      ]
+    },
+    {
+      "address": "0x9999999999999999999999999999999999999999",
+      "label": "FK Test 1",
+      "chain_type": "evm",
+      "groups": [
+        "grp_alpha",
+        "grp_whales"
+      ]
+    }
+  ]
+}

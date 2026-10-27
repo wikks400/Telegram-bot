@@ -17,6 +17,8 @@ import {
   getDashboardStats,
   getAlertHistory,
   clearAllAlerts,
+  exportWalletsBackup,
+  restoreWalletsFromBackup,
   addLog,
 } from '../database/db.ts';
 import { validateWalletAddress } from '../services/walletValidation.ts';
@@ -505,6 +507,45 @@ export function setupBot(botToken?: string): Telegraf | null {
     }
   });
 
+  // Export wallets backup: /exportwallets
+  bot.command(['exportwallets', 'backupwallets'], async (ctx) => {
+    try {
+      const backup = exportWalletsBackup();
+      const count = backup.wallets.length;
+      const groupCount = backup.groups.length;
+      let text = `💾 *PERSISTENT WALLET BACKUP SUMMARY*\n\n`;
+      text += `• Total Tracked Wallets: *${count}*\n`;
+      text += `• Total Groups: *${groupCount}*\n`;
+      text += `• Exported: ${new Date(backup.exportedAt).toISOString()}\n\n`;
+      text += `🛡️ *VPS Persistence Status:*\nWallets are automatically mirrored to \`wallets_backup.json\`. Even if your VPS goes down or restarts, all wallets auto-restore on startup!\n\n`;
+      if (count > 0) {
+        text += `👛 *Sample Tracked Addresses (${Math.min(5, count)}/${count}):*\n`;
+        backup.wallets.slice(0, 5).forEach((w, i) => {
+          text += `${i + 1}. \`${w.address}\` (${w.label || 'Unnamed'})\n`;
+        });
+      } else {
+        text += `_No wallets currently tracked. Use \`/addwallet\` or \`/addwallets\` to add some._\n`;
+      }
+      text += `\n💡 Use \`/restorewallets\` if you ever need to manually force a re-sync from disk.`;
+      await ctx.reply(text, { parse_mode: 'Markdown' });
+    } catch (err: any) {
+      await ctx.reply(`❌ Error exporting backup: ${err.message}`);
+    }
+  });
+
+  // Restore wallets from backup: /restorewallets
+  bot.command('restorewallets', async (ctx) => {
+    try {
+      const res = restoreWalletsFromBackup();
+      await ctx.reply(
+        `📥 *Wallets Restored from Persistent Disk!*\n\n• Wallets Restored: *${res.restoredWallets}*\n• Groups Restored: *${res.restoredGroups}*\n\nAll addresses and group mappings are now actively monitored.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (err: any) {
+      await ctx.reply(`❌ Error restoring wallets: ${err.message}`);
+    }
+  });
+
   // Delete wallet: /delwallet <address>
   bot.command('delwallet', async (ctx) => {
     const parts = ctx.message.text.trim().split(/\s+/).slice(1);
@@ -940,6 +981,18 @@ export function simulateTelegramMessage(userId: number, commandText: string): { 
   if (cmd === '/clearalerts') {
     const count = clearAllAlerts();
     return { text: `🗑️ *Alert History & Milestones Cleared!*\n\nPurged *${count}* recorded alert(s) and reset all milestone alert tracking records.\n\n🎯 *Reminder:* Alerts trigger only when 3, 6, 10, or 15 unique tracked wallets mint or buy.` };
+  }
+
+  if (cmd === '/exportwallets' || cmd === '/backupwallets' || cmd === '/backup') {
+    const backup = exportWalletsBackup();
+    const count = backup.wallets.length;
+    let text = `💾 *PERSISTENT WALLET BACKUP SUMMARY*\n\n• Tracked Wallets: *${count}*\n• Groups: *${backup.groups.length}*\n• Auto-Backup File: \`wallets_backup.json\`\n\n🛡️ *VPS Persistence:* All wallets are automatically mirrored to disk and will auto-restore if the VPS restarts.`;
+    return { text };
+  }
+
+  if (cmd === '/restorewallets') {
+    const res = restoreWalletsFromBackup();
+    return { text: `📥 *Wallets Restored from Backup!*\n\n• Restored: *${res.restoredWallets}* wallets across *${res.restoredGroups}* groups.` };
   }
 
   if (cmd === '/creategroup') {

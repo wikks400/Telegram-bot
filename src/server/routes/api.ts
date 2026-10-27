@@ -20,6 +20,8 @@ import {
   addLog,
   recordProcessedEvent,
   clearAllAlerts,
+  exportWalletsBackup,
+  restoreWalletsFromBackup,
 } from '../database/db.ts';
 import { validateWalletAddress } from '../services/walletValidation.ts';
 import { openseaService } from '../services/openseaService.ts';
@@ -145,6 +147,34 @@ apiRouter.post('/wallets/clear', (_req: Request, res: Response) => {
   try {
     const count = clearAllWallets();
     res.json({ success: true, removedCount: count, message: `Removed all ${count} tracked wallets` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Export wallets backup
+apiRouter.get('/wallets/backup', (_req: Request, res: Response) => {
+  try {
+    const backup = exportWalletsBackup();
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="wallets_backup_${Date.now()}.json"`);
+    res.json(backup);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Restore wallets from backup
+apiRouter.post('/wallets/restore', (req: Request, res: Response) => {
+  try {
+    const payload = req.body?.wallets ? req.body : undefined;
+    const result = restoreWalletsFromBackup(payload);
+    res.json({
+      success: true,
+      restoredWallets: result.restoredWallets,
+      restoredGroups: result.restoredGroups,
+      message: `Restored ${result.restoredWallets} wallets and ${result.restoredGroups} groups`,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

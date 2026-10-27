@@ -40,6 +40,13 @@ export function initDatabase(dbPath?: string): DatabaseSync {
   currentDbPath = targetPath;
   dbInstance = db;
 
+  if (targetPath !== ':memory:') {
+    try {
+      db.exec('PRAGMA journal_mode = WAL;');
+      db.exec('PRAGMA synchronous = NORMAL;');
+    } catch {}
+  }
+
   // Run migrations
   migrateDatabase(db);
   seedInitialData(db);
@@ -154,6 +161,133 @@ function migrateDatabase(db: DatabaseSync) {
   } catch {}
 }
 
+export interface WalletsBackupPayload {
+  version: 1;
+  exportedAt: number;
+  groups: { id: string; name: string; description?: string }[];
+  wallets: { address: string; label?: string; chain_type: 'evm' | 'solana' | 'flow' | 'other'; groups: string[] }[];
+}
+
+export function exportWalletsBackup(db = initDatabase()): WalletsBackupPayload {
+  const groups = getAllGroups(db).map((g) => ({
+    id: g.id,
+    name: g.name,
+    description: g.description,
+  }));
+  const wallets = getAllWallets(db).map((w) => ({
+    address: w.address,
+    label: w.label,
+    chain_type: w.chain_type,
+    groups: w.groups || [],
+  }));
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    groups,
+    wallets,
+  };
+}
+
+export function saveWalletsBackupToFile(db = initDatabase()): void {
+  try {
+    const backup = exportWalletsBackup(db);
+    const jsonStr = JSON.stringify(backup, null, 2);
+
+    const locations = [
+      path.resolve('./data/wallets_backup.json'),
+      path.resolve('./wallets_backup.json'),
+    ];
+
+    for (const loc of locations) {
+      try {
+        const dir = path.dirname(loc);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(loc, jsonStr, 'utf-8');
+      } catch {
+        // ignore individual write error
+      }
+    }
+  } catch (err: any) {
+    addLog('warn', 'db', 'Failed writing wallets backup file', err.message);
+  }
+}
+
+export function restoreWalletsFromBackup(
+  backupData?: WalletsBackupPayload,
+  db = initDatabase()
+): { restoredWallets: number; restoredGroups: number } {
+  let data = backupData;
+  if (!data) {
+    const locations = [
+      path.resolve('./data/wallets_backup.json'),
+      path.resolve('./wallets_backup.json'),
+    ];
+    for (const loc of locations) {
+      if (fs.existsSync(loc)) {
+        try {
+          const raw = fs.readFileSync(loc, 'utf-8');
+          data = JSON.parse(raw);
+          if (data && Array.isArray(data.wallets) && data.wallets.length > 0) {
+            break;
+          }
+        } catch {
+          // try next
+        }
+      }
+    }
+  }
+
+  if (!data || !Array.isArray(data.wallets)) {
+    return { restoredWallets: 0, restoredGroups: 0 };
+  }
+
+  let restoredGroups = 0;
+  let restoredWallets = 0;
+
+  // Restore groups
+  if (Array.isArray(data.groups)) {
+    for (const g of data.groups) {
+      if (!g.id || !g.name) continue;
+      const existing = db.prepare('SELECT id FROM groups WHERE id = ? OR LOWER(name) = LOWER(?)').get(g.id, g.name);
+      if (!existing) {
+        db.prepare('INSERT INTO groups (id, name, description, created_at, is_enabled) VALUES (?, ?, ?, ?, 1)')
+          .run(g.id, g.name, g.description || '', Date.now());
+        restoredGroups++;
+      }
+    }
+  }
+
+  // Restore wallets
+  for (const w of data.wallets) {
+    if (!w.address) continue;
+    const norm = w.address.trim().toLowerCase();
+    const existing = db.prepare('SELECT address FROM wallets WHERE address = ? OR address = ?').get(norm, w.address.trim());
+    if (!existing) {
+      db.prepare('INSERT INTO wallets (address, label, chain_type, created_at, is_active) VALUES (?, ?, ?, ?, 1)')
+        .run(norm, w.label || 'Tracked Wallet', w.chain_type || 'evm', Date.now());
+      restoredWallets++;
+    }
+
+    // Link groups
+    if (Array.isArray(w.groups)) {
+      for (const grp of w.groups) {
+        const resolvedId = resolveGroupId(grp, db);
+        if (resolvedId) {
+          try {
+            db.prepare('INSERT OR IGNORE INTO wallet_group_members (wallet_address, group_id, added_at) VALUES (?, ?, ?)')
+              .run(norm, resolvedId, Date.now());
+          } catch {}
+        }
+      }
+    }
+  }
+
+  if (restoredWallets > 0) {
+    addLog('info', 'db', `Auto-restored ${restoredWallets} wallets and ${restoredGroups} groups from persistent backup`);
+  }
+  return { restoredWallets, restoredGroups };
+}
+
 function seedInitialData(db: DatabaseSync) {
   // Check if groups already exist
   const existingGroups = db.prepare('SELECT COUNT(*) as count FROM groups').get() as { count: number };
@@ -168,17 +302,14 @@ function seedInitialData(db: DatabaseSync) {
     insertGroup.run('grp_smart_money', 'Smart Money', 'Algorithmic snipers and consistently profitable collectors', now);
   }
 
-  // Actively remove all pre-programmed demo wallets
-  const preProgrammedAddresses = [
-    '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
-    '0xce90a7949bb78892f159f428d0dc23a8e3584d75',
-    '0x54be3a794282c030b15e43ae2bb182e14c409c5e',
-    '0x5555776d3ae1e9b25916053ae03fcbfbf476fef7',
-  ];
-
-  for (const addr of preProgrammedAddresses) {
-    db.prepare('DELETE FROM wallet_group_members WHERE wallet_address = ?').run(addr);
-    db.prepare('DELETE FROM wallets WHERE address = ?').run(addr);
+  // Auto-restore wallets from persistent backup file if database was wiped or freshly mounted
+  try {
+    const walletCountRow = db.prepare('SELECT COUNT(*) as count FROM wallets').get() as { count: number };
+    if (!walletCountRow || Number(walletCountRow.count) === 0) {
+      restoreWalletsFromBackup(undefined, db);
+    }
+  } catch (err: any) {
+    // Ignore transient restore error
   }
 }
 
@@ -213,6 +344,8 @@ export function createGroup(name: string, description: string = '', db = initDat
     INSERT INTO groups (id, name, description, created_at, is_enabled)
     VALUES (?, ?, ?, ?, 1)
   `).run(id, trimmed, description.trim(), now);
+
+  saveWalletsBackupToFile(db);
 
   return {
     id,
@@ -371,6 +504,7 @@ export function addWallet(
     }
   }
 
+  saveWalletsBackupToFile(db);
   const updatedWallets = getAllWallets(db);
   return updatedWallets.find((w) => w.address === normAddress) || {
     address: normAddress,
@@ -389,7 +523,9 @@ export function removeWallet(address: string, db = initDatabase()): boolean {
     normAddress,
     normAddress.toLowerCase()
   );
-  return (res as any).changes > 0;
+  const ok = (res as any).changes > 0;
+  if (ok) saveWalletsBackupToFile(db);
+  return ok;
 }
 
 export function addWalletToGroup(address: string, groupIdOrName: string, db = initDatabase()): boolean {
@@ -525,6 +661,9 @@ export function bulkAddWalletsToGroup(
   }
 
   addLog('info', 'db', `Bulk added ${addedCount} wallets to group "${group.name}" (${errors.length} errors)`);
+  if (addedCount > 0) {
+    saveWalletsBackupToFile(db);
+  }
 
   const updatedGroups = getAllGroups(db);
   const matchedGroup = updatedGroups.find((g) => g.id === targetGroupId) || {
