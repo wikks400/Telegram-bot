@@ -90,6 +90,8 @@ export interface ConsolidatedAlert {
   formattedMessage: string;
   timestamp: number;
   eventsCount: number;
+  milestone?: number;
+  nextMilestone?: number | null;
 }
 
 export interface SystemLog {

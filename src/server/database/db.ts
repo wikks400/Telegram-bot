@@ -117,7 +117,18 @@ function migrateDatabase(db: DatabaseSync) {
       total_wallets INTEGER NOT NULL,
       total_nfts INTEGER NOT NULL,
       events_count INTEGER NOT NULL,
+      milestone INTEGER,
+      next_milestone INTEGER,
       created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS collection_alert_milestones (
+      collection_slug TEXT NOT NULL,
+      chain TEXT NOT NULL,
+      activity_type TEXT NOT NULL,
+      milestone INTEGER NOT NULL,
+      alerted_at INTEGER NOT NULL,
+      PRIMARY KEY (collection_slug, chain, activity_type, milestone)
     );
 
     CREATE TABLE IF NOT EXISTS system_settings (
@@ -134,6 +145,13 @@ function migrateDatabase(db: DatabaseSync) {
       created_at INTEGER NOT NULL
     );
   `);
+
+  try {
+    db.exec('ALTER TABLE alert_history ADD COLUMN milestone INTEGER');
+  } catch {}
+  try {
+    db.exec('ALTER TABLE alert_history ADD COLUMN next_milestone INTEGER');
+  } catch {}
 }
 
 function seedInitialData(db: DatabaseSync) {
@@ -612,12 +630,72 @@ export function saveCollectionCache(meta: CollectionMetadata, db = initDatabase(
   );
 }
 
+// Alert Thresholds: 3, 6, 10, 15 unique minters/buyers
+export const ALERT_THRESHOLDS = [3, 6, 10, 15] as const;
+
+export function getAchievedMilestones(
+  collectionSlug: string,
+  chain: string,
+  activityType: 'mint' | 'buy',
+  uniqueCount: number,
+  db = initDatabase()
+): { eligibleMilestones: number[]; nextMilestone: number | null } {
+  const eligible: number[] = [];
+  const rows = db.prepare(`
+    SELECT milestone FROM collection_alert_milestones
+    WHERE LOWER(collection_slug) = LOWER(?)
+      AND LOWER(chain) = LOWER(?)
+      AND activity_type = ?
+  `).all(collectionSlug, chain, activityType) as any[];
+
+  const alertedSet = new Set<number>(rows.map((r) => Number(r.milestone)));
+
+  for (const t of ALERT_THRESHOLDS) {
+    if (uniqueCount >= t && !alertedSet.has(t)) {
+      eligible.push(t);
+    }
+  }
+
+  // Calculate next milestone
+  const next = ALERT_THRESHOLDS.find((t) => t > uniqueCount) || null;
+
+  return { eligibleMilestones: eligible, nextMilestone: next };
+}
+
+export function recordMilestoneAlerted(
+  collectionSlug: string,
+  chain: string,
+  activityType: 'mint' | 'buy',
+  milestone: number,
+  db = initDatabase()
+): void {
+  db.prepare(`
+    INSERT OR REPLACE INTO collection_alert_milestones
+    (collection_slug, chain, activity_type, milestone, alerted_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(collectionSlug.toLowerCase(), chain.toLowerCase(), activityType, milestone, Date.now());
+}
+
+export function clearAllAlerts(db = initDatabase()): number {
+  const countRow = db.prepare('SELECT COUNT(*) as count FROM alert_history').get() as any;
+  const count = Number(countRow?.count || 0);
+
+  db.exec(`
+    DELETE FROM alert_history;
+    DELETE FROM collection_alert_milestones;
+    DELETE FROM processed_events;
+  `);
+  addLog('info', 'db', `Cleared all alert history, collection milestones, and processed events (${count} purged)`);
+  return count;
+}
+
 // Alert history
 export function saveAlertHistory(alert: ConsolidatedAlert, db = initDatabase()): void {
+  const groupsJson = JSON.stringify(alert.groups || (alert as any).groupBreakdown || []);
   db.prepare(`
     INSERT OR REPLACE INTO alert_history
-    (id, alert_type, chain, collection_slug, collection_name, message_text, group_summaries, total_wallets, total_nfts, events_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, alert_type, chain, collection_slug, collection_name, message_text, group_summaries, total_wallets, total_nfts, events_count, milestone, next_milestone, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     alert.id,
     alert.alertType,
@@ -625,10 +703,12 @@ export function saveAlertHistory(alert: ConsolidatedAlert, db = initDatabase()):
     alert.collectionSlug,
     alert.collectionName,
     alert.formattedMessage,
-    JSON.stringify(alert.groups),
+    groupsJson,
     alert.totalUniqueWallets,
     alert.totalNFTs,
     alert.eventsCount,
+    alert.milestone || null,
+    alert.nextMilestone || null,
     alert.timestamp || Date.now()
   );
 }
@@ -665,6 +745,8 @@ export function getAlertHistory(type?: 'mint' | 'buy', limit: number = 20, db = 
       formattedMessage: r.message_text,
       timestamp: Number(r.created_at),
       eventsCount: Number(r.events_count || 1),
+      milestone: r.milestone ? Number(r.milestone) : undefined,
+      nextMilestone: r.next_milestone ? Number(r.next_milestone) : null,
     };
   });
 }

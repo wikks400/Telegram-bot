@@ -19,6 +19,7 @@ import {
   getRecentLogs,
   addLog,
   recordProcessedEvent,
+  clearAllAlerts,
 } from '../database/db.ts';
 import { validateWalletAddress } from '../services/walletValidation.ts';
 import { openseaService } from '../services/openseaService.ts';
@@ -245,7 +246,17 @@ apiRouter.get('/alerts', (req: Request, res: Response) => {
   }
 });
 
-// Simulate Alert (Mint or Buy)
+// Clear all alert history
+apiRouter.post('/alerts/clear', (_req: Request, res: Response) => {
+  try {
+    clearAllAlerts();
+    res.json({ success: true, message: 'Alert history, milestones, and processed events successfully cleared' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Simulate Alert (Mint or Buy) with milestone thresholds (3, 6, 10, 15)
 apiRouter.post('/alerts/simulate', async (req: Request, res: Response) => {
   try {
     const {
@@ -255,17 +266,20 @@ apiRouter.post('/alerts/simulate', async (req: Request, res: Response) => {
       chain = 'ethereum',
       walletAddresses = [],
       quantities = [],
+      targetWalletsCount = 3,
     } = req.body;
 
     const wallets = getAllWallets();
-    // Pick wallets
+    if (wallets.length === 0 && walletAddresses.length === 0) {
+      return res.status(400).json({
+        error: 'No tracked wallets exist in the database. Please add tracked wallets first using "+ Add Single Wallet" or "📋 Import Multiple Wallets".',
+      });
+    }
+
+    const count = Math.max(1, parseInt(targetWalletsCount, 10) || 3);
     const selectedWallets = walletAddresses.length > 0
       ? walletAddresses
-      : wallets.slice(0, 3).map((w) => w.address);
-
-    if (selectedWallets.length === 0) {
-      return res.status(400).json({ error: 'No wallets available to simulate alert' });
-    }
+      : wallets.slice(0, count).map((w) => w.address);
 
     const events: NFTEvent[] = selectedWallets.map((addr: string, i: number) => {
       const q = quantities[i] || (i + 1) * 2;
@@ -297,20 +311,33 @@ apiRouter.post('/alerts/simulate', async (req: Request, res: Response) => {
     });
 
     const meta = await openseaService.getCollectionMetadata(collectionSlug);
-    const consolidated = alertConsolidator.consolidateEvents(events, { [collectionSlug]: meta });
+    // Allow simulation to test threshold suppression or milestones
+    const isSingleSuppressed = selectedWallets.length < 3;
+    const consolidated = alertConsolidator.consolidateEvents(
+      events,
+      { [collectionSlug]: meta },
+      { bypassThreshold: false, isSimulation: true }
+    );
 
     if (consolidated.length > 0) {
       for (const alert of consolidated) {
         saveAlertHistory(alert);
-        // Also broadcast to Telegram if bot is initialized
         const botInstance = (req.app as any).get('telegramBot');
         await broadcastTelegramAlert(botInstance, alert.formattedMessage);
       }
-      res.json({ success: true, alerts: consolidated });
+      res.json({
+        success: true,
+        alerts: consolidated,
+        milestone: consolidated[0]?.milestone,
+        message: `🚨 Milestone ${consolidated[0]?.milestone} Alert Triggered (${selectedWallets.length} unique wallets)!`,
+      });
     } else {
       res.json({
         success: false,
-        message: 'No qualifying groups found for the selected wallets. Assign wallets to groups first.',
+        suppressed: true,
+        message: isSingleSuppressed
+          ? `🔕 Alert Suppressed: Only ${selectedWallets.length} wallet(s) active. Rules require at least 3 unique wallets before sending an alert.`
+          : `ℹ️ No new alert: Milestone for ${selectedWallets.length} wallets was already alerted. Next alert triggers at milestone 6, 10, or 15.`,
       });
     }
   } catch (err: any) {

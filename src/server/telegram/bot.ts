@@ -16,6 +16,7 @@ import {
   removeWalletFromGroup,
   getDashboardStats,
   getAlertHistory,
+  clearAllAlerts,
   addLog,
 } from '../database/db.ts';
 import { validateWalletAddress } from '../services/walletValidation.ts';
@@ -45,19 +46,23 @@ export function getMainMenuKeyboard() {
   return Markup.inlineKeyboard([
     [
       Markup.button.callback('📊 Dashboard', 'menu_dashboard'),
-      Markup.button.callback('👛 Manage Wallets', 'menu_wallets'),
+      Markup.button.callback('👛 View Wallets', 'menu_wallets'),
+    ],
+    [
+      Markup.button.callback('➕ Add Single Wallet', 'menu_add_single'),
+      Markup.button.callback('📋 Import Multiple Wallets', 'menu_add_bulk'),
     ],
     [
       Markup.button.callback('📁 Wallet Groups', 'menu_groups'),
       Markup.button.callback('⚙️ Settings', 'menu_settings'),
     ],
     [
-      Markup.button.callback('🔥 Recent Mint Alerts', 'menu_recent_mints'),
-      Markup.button.callback('🛒 Recent Purchase Alerts', 'menu_recent_buys'),
+      Markup.button.callback('🔥 Recent Mints', 'menu_recent_mints'),
+      Markup.button.callback('🛒 Recent Buys', 'menu_recent_buys'),
     ],
     [
-      Markup.button.callback('❓ Help', 'menu_help'),
-      Markup.button.callback('🧪 Test Alert', 'menu_test_alert'),
+      Markup.button.callback('❓ Help & Rules', 'menu_help'),
+      Markup.button.callback('🧪 Preview Alert', 'menu_test_alert'),
     ],
   ]);
 }
@@ -73,6 +78,8 @@ export function buildDashboardMessage(): string {
 ⛓️ *Chains Supported:* ${stats.supportedChainsCount} (${stats.monitoredChainsCount} actively monitored)
 🔄 *Poll Interval:* ${stats.pollIntervalSeconds}s
 🤖 *Bot Mode:* ${botMode}
+
+🎯 *Threshold Milestones:* 3, 6, 10, 15 unique wallets (1-2 wallets suppressed)
 
 🔥 *Mint Activity (Total):*
 • Unique Minters: ${stats.uniqueMintersCount}
@@ -91,8 +98,14 @@ export function buildWalletsListMessage(page: number = 0, limit: number = 5): { 
   const wallets = getAllWallets();
   if (wallets.length === 0) {
     return {
-      text: `👛 *Tracked Wallets (0)*\n\nNo wallets are currently tracked.\n\nUse \`/addwallet <address> <label> [group1,group2]\` to add a wallet.`,
-      keyboard: Markup.inlineKeyboard([[Markup.button.callback('« Back to Menu', 'menu_main')]]),
+      text: `👛 *Tracked Smart Money Wallets (0)*\n\nNo wallets are currently monitored.\n\n*Choose an import method:*\n1️⃣ *Single Wallet:* \`/addwallet <address> [label] [group]\`\n2️⃣ *Multiple Wallets (Bulk):* \`/addwallets <group> <address1> <address2>...\`\n\n🎯 *Alert Thresholds:* Alerts trigger ONLY when 3, 6, 10, or 15 unique tracked wallets mint or buy.`,
+      keyboard: Markup.inlineKeyboard([
+        [
+          Markup.button.callback('➕ Add Single Wallet', 'menu_add_single'),
+          Markup.button.callback('📋 Import Multiple Wallets', 'menu_add_bulk'),
+        ],
+        [Markup.button.callback('« Back to Menu', 'menu_main')],
+      ]),
     };
   }
 
@@ -103,16 +116,19 @@ export function buildWalletsListMessage(page: number = 0, limit: number = 5): { 
   let text = `👛 *Tracked Wallets (${wallets.length})* — Page ${curPage + 1}/${totalPages}\n\n`;
 
   slice.forEach((w, idx) => {
-    const shortAddr = `${w.address.slice(0, 6)}...${w.address.slice(-4)}`;
     const groupNames = w.group_names && w.group_names.length > 0 ? w.group_names.join(', ') : 'None';
     text += `${curPage * limit + idx + 1}. *${w.label || 'Unnamed'}* (${w.chain_type.toUpperCase()})\n`;
     text += `   \`${w.address}\`\n`;
     text += `   📁 Groups: _${groupNames}_\n\n`;
   });
 
-  text += `💡 *Commands:*\n• \`/addwallet <addr> <label> [groups]\`\n• \`/delwallet <addr>\`\n• \`/walletinfo <addr>\``;
+  text += `💡 *Commands:*\n• \`/addwallet <addr> [label] [group]\` (Single)\n• \`/addwallets <group> <addr1> <addr2>...\` (Bulk)\n• \`/delwallet <addr>\`\n• \`/clearwallets\``;
 
   const buttons: any[] = [];
+  buttons.push([
+    Markup.button.callback('➕ Add Single', 'menu_add_single'),
+    Markup.button.callback('📋 Import Bulk', 'menu_add_bulk'),
+  ]);
   const navRow: any[] = [];
   if (curPage > 0) {
     navRow.push(Markup.button.callback('⬅️ Prev', `wallets_page_${curPage - 1}`));
@@ -189,6 +205,11 @@ export function buildSettingsMessage(): string {
 export function buildHelpMessage(): string {
   return `❓ *NFT SMART MONEY BOT — HELP & COMMANDS*
 
+🎯 *Threshold Milestone Alerting Rules:*
+• Alerts trigger ONLY when *3, 6, 10, or 15 unique wallets* mint or buy the same collection.
+• Individual purchases by 1 or 2 wallets are *suppressed* to prevent alert noise.
+• Next milestone alerts are dispatched when reaching total of 6, 10, and 15 unique minters/buyers across any group!
+
 🤖 *Main Commands:*
 • \`/start\` or \`/menu\` — Open interactive main menu
 • \`/dashboard\` — View system metrics and monitoring status
@@ -197,14 +218,15 @@ export function buildHelpMessage(): string {
 • \`/mints\` — View recent NFT mint alerts
 • \`/buys\` — View recent NFT purchase alerts
 • \`/settings\` — View bot settings & admin list
-• \`/testalert\` — Generate and broadcast a sample consolidated alert
+• \`/testalert\` — Generate a sample threshold alert preview
+• \`/clearalerts\` — Purge all alert history and reset milestone records
 
 👛 *Wallet Management:*
-• \`/addwallet <address> <label> [group1,group2]\`
-  _Example:_ \`/addwallet 0xd8da6bf26964af9d7eed9e03e53415d37aa96045 Vitalik grp_alpha\`
+• \`/addwallet <address> [label] [group]\` — Add a single wallet
+  _Example:_ \`/addwallet 0xd8da6bf26964af9d7eed9e03e53415d37aa96045 Vitalik Alpha\`
 • \`/addwallets <groupId|groupName> <addr1> [addr2]...\` — Add multiple wallets at once
   _Example:_ \`/addwallets Alpha 0x111... 0x222... 0x333...\`
-• \`/delwallet <address>\`
+• \`/delwallet <address>\` — Remove wallet from monitoring
 • \`/clearwallets\` — Delete all tracked wallets from the bot
 • \`/walletinfo <address>\` — See groups containing this wallet
 • \`/addtogroup <address> <groupId>\`
@@ -470,6 +492,19 @@ export function setupBot(botToken?: string): Telegraf | null {
     }
   });
 
+  // Clear all alerts and reset milestones: /clearalerts
+  bot.command('clearalerts', async (ctx) => {
+    try {
+      const count = clearAllAlerts();
+      await ctx.reply(
+        `🗑️ *Alert History & Milestones Cleared!*\n\nPurged *${count}* recorded alert(s) and reset all milestone alert tracking records.\n\n🎯 *Reminder:* Alerts trigger only when 3, 6, 10, or 15 unique tracked wallets mint or buy.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (err: any) {
+      await ctx.reply(`❌ Error clearing alerts: ${err.message}`);
+    }
+  });
+
   // Delete wallet: /delwallet <address>
   bot.command('delwallet', async (ctx) => {
     const parts = ctx.message.text.trim().split(/\s+/).slice(1);
@@ -590,21 +625,25 @@ export function setupBot(botToken?: string): Telegraf | null {
 
   // Test alert command: /testalert
   bot.command('testalert', async (ctx) => {
-    const sampleMessage = `🔥 SMART MONEY MINT
+    const sampleMessage = `🧪 *[DEMO / TEST ALERT PREVIEW]*
+🔥 *SMART MONEY MINT*
+🚨 *THRESHOLD REACHED: 3 UNIQUE WALLETS!* [Milestone 1/4]
 
-📦 Collection: Pudgy Penguins
-⛓️ Chain: Ethereum
+📦 *Collection:* Pudgy Penguins
+⛓️ *Chain:* Ethereum
 
-📊 Group Activity
-📁 Alpha — 3 Minters | 12 NFTs
-📁 Whales — 2 Minters | 7 NFTs
-📁 Smart Money — 4 Minters | 15 NFTs
+📊 *Group Activity:*
+📁 Alpha — 2 Minters | 4 NFTs
+📁 Whales — 1 Minter | 2 NFTs
 
-🔢 Total: 8 Unique Wallets | 34 NFTs Minted
+🔢 *Total:* 3 Unique Wallets | 6 NFTs Minted
+🎯 *Milestone:* 3 Unique Wallets (Next alert at 6 wallets)
 
-⚡ Activity: NFT Mint
-🔗 OpenSea: https://opensea.io/collection/pudgypenguins
-🌐 Socials: [X/Twitter](https://x.com/pudgypenguins) • [Discord](https://discord.gg/pudgypenguins) • [Website](https://pudgypenguins.com)`;
+⚡ *Activity:* NFT Mint
+🔗 *OpenSea:* https://opensea.io/collection/pudgypenguins
+🌐 *Socials:* [X/Twitter](https://x.com/pudgypenguins) • [Website](https://pudgypenguins.com)
+
+⚠️ _This is a test preview. Live alerts trigger ONLY when 3, 6, 10, or 15 unique tracked wallets mint or buy._`;
 
     await ctx.reply(sampleMessage, { parse_mode: 'Markdown' });
   });
@@ -612,6 +651,50 @@ export function setupBot(botToken?: string): Telegraf | null {
   // Action / Callback Query Handlers
   bot.action('menu_main', async (ctx) => {
     await ctx.editMessageText('👋 *Main Menu*', { parse_mode: 'Markdown', ...getMainMenuKeyboard() });
+  });
+
+  bot.action('menu_add_single', async (ctx) => {
+    const text = `➕ *Add a Single Wallet to Track*
+
+To monitor an individual wallet, send:
+\`/addwallet <address> [label] [group]\`
+
+*Example:*
+\`/addwallet 0xd8da6bf26964af9d7eed9e03e53415d37aa96045 Vitalik Alpha\`
+
+💡 *Default group is "Alpha" if unspecified.*`;
+    await ctx.reply(text, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Import Multiple Wallets', 'menu_add_bulk')],
+        [Markup.button.callback('« Back to Menu', 'menu_main')],
+      ]),
+    });
+  });
+
+  bot.action('menu_add_bulk', async (ctx) => {
+    const text = `📋 *Import Multiple Wallets (Bulk)*
+
+Add multiple wallets to a group in one quick command:
+\`/addwallets <groupId|groupName> <addr1> <addr2>...\`
+
+*Or paste a list of addresses:*
+\`\`\`
+/addwallets Alpha
+0xd8da6bf26964af9d7eed9e03e53415d37aa96045
+0xce90a7949bb78892f159f428d0dc23a8e3584d75
+0x5663e3E096f1743e771888492242C1DaFBD3f32f
+\`\`\`
+
+🎯 *Milestone Alert Thresholds:*
+Alerts trigger ONLY when *3, 6, 10, or 15 unique wallets* mint or buy the same collection!`;
+    await ctx.reply(text, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Add Single Wallet', 'menu_add_single')],
+        [Markup.button.callback('« Back to Menu', 'menu_main')],
+      ]),
+    });
   });
 
   bot.action('menu_dashboard', async (ctx) => {
@@ -666,20 +749,23 @@ export function setupBot(botToken?: string): Telegraf | null {
   });
 
   bot.action('menu_test_alert', async (ctx) => {
-    const sampleMessage = `🔥 SMART MONEY MINT
+    const sampleMessage = `🧪 *[DEMO / TEST ALERT PREVIEW]*
+🔥 *SMART MONEY MINT*
+🚨 *THRESHOLD REACHED: 3 UNIQUE WALLETS!* [Milestone 1/4]
 
-📦 Collection: CyberKongz
-⛓️ Chain: Ethereum
+📦 *Collection:* CyberKongz
+⛓️ *Chain:* Ethereum
 
-📊 Group Activity
+📊 *Group Activity:*
 📁 Alpha — 2 Minters | 5 NFTs
-📁 Smart Money — 3 Minters | 9 NFTs
+📁 Smart Money — 1 Minter | 3 NFTs
 
-🔢 Total: 4 Unique Wallets | 14 NFTs Minted
+🔢 *Total:* 3 Unique Wallets | 8 NFTs Minted
+🎯 *Milestone:* 3 Unique Wallets (Next alert at 6 wallets)
 
-⚡ Activity: NFT Mint
-🔗 OpenSea: https://opensea.io/collection/cyberkongz
-🌐 Socials: [X/Twitter](https://x.com/cyberkongz) • [Website](https://cyberkongz.com)`;
+⚡ *Activity:* NFT Mint
+🔗 *OpenSea:* https://opensea.io/collection/cyberkongz
+🌐 *Socials:* [X/Twitter](https://x.com/cyberkongz) • [Website](https://cyberkongz.com)`;
 
     await ctx.reply(sampleMessage, { parse_mode: 'Markdown' });
   });
@@ -767,26 +853,30 @@ export function simulateTelegramMessage(userId: number, commandText: string): { 
 
   if (cmd === '/testalert') {
     return {
-      text: `🔥 SMART MONEY MINT
+      text: `🧪 *[DEMO / TEST ALERT PREVIEW]*
+🔥 *SMART MONEY MINT*
+🚨 *THRESHOLD REACHED: 3 UNIQUE WALLETS!* [Milestone 1/4]
 
-📦 Collection: Pudgy Penguins
-⛓️ Chain: Ethereum
+📦 *Collection:* Pudgy Penguins
+⛓️ *Chain:* Ethereum
 
-📊 Group Activity
-📁 Alpha — 3 Minters | 12 NFTs
-📁 Whales — 2 Minters | 7 NFTs
-📁 Smart Money — 4 Minters | 15 NFTs
+📊 *Group Activity:*
+📁 Alpha — 2 Minters | 4 NFTs
+📁 Whales — 1 Minter | 2 NFTs
 
-🔢 Total: 8 Unique Wallets | 34 NFTs Minted
+🔢 *Total:* 3 Unique Wallets | 6 NFTs Minted
+🎯 *Milestone:* 3 Unique Wallets (Next alert at 6 wallets)
 
-⚡ Activity: NFT Mint
-🔗 OpenSea: https://opensea.io/collection/pudgypenguins
-🌐 Socials: [X/Twitter](https://x.com/pudgypenguins) • [Discord](https://discord.gg/pudgypenguins) • [Website](https://pudgypenguins.com)`,
+⚡ *Activity:* NFT Mint
+🔗 *OpenSea:* https://opensea.io/collection/pudgypenguins
+🌐 *Socials:* [X/Twitter](https://x.com/pudgypenguins) • [Website](https://pudgypenguins.com)
+
+⚠️ _This is a test preview. Live alerts trigger ONLY when 3, 6, 10, or 15 unique tracked wallets mint or buy._`,
     };
   }
 
   if (cmd === '/addwallet') {
-    if (parts.length === 0) return { text: '⚠️ Usage: `/addwallet <address> [label] [group]`' };
+    if (parts.length === 0) return { text: '⚠️ Usage: `/addwallet <address> [label] [group]`\n\n_Example:_\n`/addwallet 0xd8da6bf26964af9d7eed9e03e53415d37aa96045 Vitalik Alpha`' };
 
     const bulkParsed = parseBulkWalletsInput(trimmed);
     if (bulkParsed.items.length > 1) {
@@ -845,6 +935,11 @@ export function simulateTelegramMessage(userId: number, commandText: string): { 
   if (cmd === '/clearwallets') {
     const count = clearAllWallets();
     return { text: `🗑️ *All Wallets Cleared!*\n\nRemoved *${count}* tracked wallet(s) from monitoring. All pre-programmed and custom wallets have been deleted.` };
+  }
+
+  if (cmd === '/clearalerts') {
+    const count = clearAllAlerts();
+    return { text: `🗑️ *Alert History & Milestones Cleared!*\n\nPurged *${count}* recorded alert(s) and reset all milestone alert tracking records.\n\n🎯 *Reminder:* Alerts trigger only when 3, 6, 10, or 15 unique tracked wallets mint or buy.` };
   }
 
   if (cmd === '/creategroup') {

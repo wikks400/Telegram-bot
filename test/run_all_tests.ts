@@ -16,6 +16,10 @@ import {
   isEventProcessed,
   saveAlertHistory,
   getAlertHistory,
+  clearAllAlerts,
+  getAchievedMilestones,
+  recordMilestoneAlerted,
+  ALERT_THRESHOLDS,
   closeDatabase,
 } from '../src/server/database/db.ts';
 import { validateWalletAddress } from '../src/server/services/walletValidation.ts';
@@ -361,8 +365,12 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
   // 10. Purchase Alert Formatting (Section 6)
   await record('Formatting NFT Purchase alerts correctly (🔥 SMART MONEY BUY)', 'Alert Formatting', () => {
     const gAlpha = getAllGroups(db)[0];
-    const testBuyer = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-    addWallet(testBuyer, 'Test Alpha Buyer', 'evm', [gAlpha.id], db);
+    const testBuyer1 = '0x1111111111111111111111111111111111111111';
+    const testBuyer2 = '0x2222222222222222222222222222222222222222';
+    const testBuyer3 = '0x3333333333333333333333333333333333333333';
+    addWallet(testBuyer1, 'Buyer 1', 'evm', [gAlpha.id], db);
+    addWallet(testBuyer2, 'Buyer 2', 'evm', [gAlpha.id], db);
+    addWallet(testBuyer3, 'Buyer 3', 'evm', [gAlpha.id], db);
 
     const events = [
       {
@@ -370,8 +378,26 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
         event_type: 'sale' as const,
         chain: 'ethereum',
         collection_slug: 'milady',
-        wallet_address: testBuyer,
+        wallet_address: testBuyer1,
         quantity: 2,
+        timestamp: Date.now(),
+      },
+      {
+        event_id: 'buy_ev_2',
+        event_type: 'sale' as const,
+        chain: 'ethereum',
+        collection_slug: 'milady',
+        wallet_address: testBuyer2,
+        quantity: 1,
+        timestamp: Date.now(),
+      },
+      {
+        event_id: 'buy_ev_3',
+        event_type: 'sale' as const,
+        chain: 'ethereum',
+        collection_slug: 'milady',
+        wallet_address: testBuyer3,
+        quantity: 1,
         timestamp: Date.now(),
       },
     ];
@@ -397,6 +423,7 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
     if (!msg.includes('Buyers')) throw new Error('Expected "Buyers" in group row');
     if (!msg.includes('NFTs Bought')) throw new Error('Expected "NFTs Bought" in total line');
     if (!msg.includes('⚡ Activity: NFT Purchase')) throw new Error('Expected Activity: NFT Purchase');
+    if (!msg.includes('THRESHOLD REACHED: 3 UNIQUE WALLETS!')) throw new Error('Expected milestone badge in message');
   });
 
   // 11. Handling Missing Socials Gracefully
@@ -572,6 +599,116 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
 
     if (monitorService.getStatus().pollIntervalMs !== 10000) {
       throw new Error(`Expected pollIntervalMs to be 10000ms, got ${monitorService.getStatus().pollIntervalMs}`);
+    }
+  });
+
+  // 19. Threshold Milestone Alerting: 3, 6, 10, 15 Unique Wallets Enforcement
+  await record('Threshold Milestone Alerting: 3, 6, 10, 15 unique wallets enforcement', 'Threshold Alerting', () => {
+    const slug = 'threshold-test-collection';
+    const chain = 'ethereum';
+
+    // Clear any previous records
+    clearAllAlerts(db);
+
+    // Step A: 1 and 2 wallets must NOT produce an alert
+    const oneWallet = getAchievedMilestones(slug, chain, 'mint', 1, db);
+    if (oneWallet.eligibleMilestones.length !== 0) {
+      throw new Error(`Expected 0 milestones for 1 wallet, got ${oneWallet.eligibleMilestones.length}`);
+    }
+
+    const twoWallets = getAchievedMilestones(slug, chain, 'mint', 2, db);
+    if (twoWallets.eligibleMilestones.length !== 0) {
+      throw new Error(`Expected 0 milestones for 2 wallets, got ${twoWallets.eligibleMilestones.length}`);
+    }
+
+    // Step B: 3 wallets reaches Milestone 1 (threshold 3)
+    const threeWallets = getAchievedMilestones(slug, chain, 'mint', 3, db);
+    if (threeWallets.eligibleMilestones.length !== 1 || threeWallets.eligibleMilestones[0] !== 3) {
+      throw new Error(`Expected milestone [3], got ${JSON.stringify(threeWallets.eligibleMilestones)}`);
+    }
+
+    // Record milestone 3 as alerted
+    recordMilestoneAlerted(slug, chain, 'mint', 3, db);
+
+    // Step C: 4 or 5 wallets should NOT produce another alert since milestone 3 was alerted and milestone 6 is not reached
+    const fourWallets = getAchievedMilestones(slug, chain, 'mint', 4, db);
+    if (fourWallets.eligibleMilestones.length !== 0) {
+      throw new Error(`Expected 0 unnotified milestones for 4 wallets, got ${JSON.stringify(fourWallets.eligibleMilestones)}`);
+    }
+    const fiveWallets = getAchievedMilestones(slug, chain, 'mint', 5, db);
+    if (fiveWallets.eligibleMilestones.length !== 0) {
+      throw new Error(`Expected 0 unnotified milestones for 5 wallets, got ${JSON.stringify(fiveWallets.eligibleMilestones)}`);
+    }
+
+    // Step D: 6 wallets reaches Milestone 2 (threshold 6)
+    const sixWallets = getAchievedMilestones(slug, chain, 'mint', 6, db);
+    if (sixWallets.eligibleMilestones.length !== 1 || sixWallets.eligibleMilestones[0] !== 6) {
+      throw new Error(`Expected milestone [6], got ${JSON.stringify(sixWallets.eligibleMilestones)}`);
+    }
+    recordMilestoneAlerted(slug, chain, 'mint', 6, db);
+
+    // Step E: 10 wallets reaches Milestone 3 (threshold 10)
+    const tenWallets = getAchievedMilestones(slug, chain, 'mint', 10, db);
+    if (tenWallets.eligibleMilestones.length !== 1 || tenWallets.eligibleMilestones[0] !== 10) {
+      throw new Error(`Expected milestone [10], got ${JSON.stringify(tenWallets.eligibleMilestones)}`);
+    }
+    recordMilestoneAlerted(slug, chain, 'mint', 10, db);
+
+    // Step F: 15 wallets reaches Milestone 4 (threshold 15)
+    const fifteenWallets = getAchievedMilestones(slug, chain, 'mint', 15, db);
+    if (fifteenWallets.eligibleMilestones.length !== 1 || fifteenWallets.eligibleMilestones[0] !== 15) {
+      throw new Error(`Expected milestone [15], got ${JSON.stringify(fifteenWallets.eligibleMilestones)}`);
+    }
+    recordMilestoneAlerted(slug, chain, 'mint', 15, db);
+
+    // No further milestones beyond 15
+    const sixteenWallets = getAchievedMilestones(slug, chain, 'mint', 16, db);
+    if (sixteenWallets.eligibleMilestones.length !== 0) {
+      throw new Error(`Expected 0 unnotified milestones for 16 wallets, got ${JSON.stringify(sixteenWallets.eligibleMilestones)}`);
+    }
+  });
+
+  // 20. Clear All Alerts & Reset Milestones
+  await record('Purging all alert history and resetting milestone records', 'Threshold Alerting', () => {
+    const slug = 'reset-test-collection';
+    const chain = 'ethereum';
+
+    // Record milestone 3
+    recordMilestoneAlerted(slug, chain, 'buy', 3, db);
+
+    // Save alert history
+    saveAlertHistory({
+      id: 'test_alert_reset',
+      alertType: 'buy',
+      collectionSlug: slug,
+      collectionName: 'Reset Test',
+      chain,
+      totalUniqueWallets: 3,
+      totalNFTs: 5,
+      eventsCount: 3,
+      groups: [{ groupName: 'Alpha', groupId: 'grp_alpha', uniqueCount: 3, nftsCount: 5 }],
+      timestamp: Date.now(),
+      formattedMessage: 'Test alert',
+      openseaUrl: 'https://opensea.io/collection/reset-test',
+      socials: {},
+      milestone: 3,
+      nextMilestone: 6,
+    }, db);
+
+    const beforeAlerts = getAlertHistory(undefined, 10, db);
+    if (beforeAlerts.length === 0) throw new Error('Expected alert history to have items before clear');
+
+    // Run clearAllAlerts
+    const clearedCount = clearAllAlerts(db);
+    if (clearedCount < 1) throw new Error(`Expected clearedCount >= 1, got ${clearedCount}`);
+
+    const afterAlerts = getAlertHistory(undefined, 10, db);
+    if (afterAlerts.length !== 0) throw new Error(`Expected 0 alerts after clear, got ${afterAlerts.length}`);
+
+    // Milestone 3 should now be available again since table was cleared
+    const unnotified = getAchievedMilestones(slug, chain, 'buy', 3, db);
+    if (unnotified.eligibleMilestones.length !== 1 || unnotified.eligibleMilestones[0] !== 3) {
+      throw new Error(`Expected milestone 3 to be available again after reset, got ${JSON.stringify(unnotified.eligibleMilestones)}`);
     }
   });
 

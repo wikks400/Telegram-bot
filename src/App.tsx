@@ -197,8 +197,11 @@ export default function App() {
   };
 
   // Trigger simulated alert
-  const handleSimulateAlert = async (type: 'mint' | 'buy') => {
+  const [alertFeedback, setAlertFeedback] = useState<string | null>(null);
+
+  const handleSimulateAlert = async (type: 'mint' | 'buy', count: number = 3) => {
     setLoading(true);
+    setAlertFeedback(null);
     try {
       const defaultCollection =
         type === 'mint'
@@ -213,21 +216,38 @@ export default function App() {
           collectionSlug: defaultCollection.slug,
           collectionName: defaultCollection.name,
           chain: defaultCollection.chain,
+          targetWalletsCount: count,
         }),
-      }).then((r) => r.json());
+      });
 
+      const data = await res.json();
       await fetchData();
-      if (res.ok) {
-        const data = await res.json();
-        await fetchData();
-        if (data?.success) {
-          setCurrentTab('alerts');
-        }
+
+      if (data?.suppressed) {
+        setAlertFeedback(data.message || `Suppressed: Only ${count} wallet(s). Threshold is 3 unique wallets.`);
+      } else if (data?.success) {
+        setAlertFeedback(data.message || `Alert generated for ${count} unique wallets!`);
+        setCurrentTab('alerts');
       }
-    } catch {
-      // Ignored
+    } catch (err: any) {
+      setAlertFeedback(`Simulation error: ${err.message}`);
     } finally {
       setLoading(false);
+      setTimeout(() => setAlertFeedback(null), 5000);
+    }
+  };
+
+  const handleClearAlerts = async () => {
+    setLoading(true);
+    try {
+      await fetch('/api/alerts/clear', { method: 'POST' });
+      await fetchData();
+      setAlertFeedback('All alerts and milestone records successfully purged.');
+    } catch (err: any) {
+      setAlertFeedback(`Error clearing alerts: ${err.message}`);
+    } finally {
+      setLoading(false);
+      setTimeout(() => setAlertFeedback(null), 4000);
     }
   };
 
@@ -686,27 +706,96 @@ export default function App() {
         {/* ALERTS FEED TAB */}
         {currentTab === 'alerts' && (
           <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-xl p-4">
+            {/* Feedback notification toast / banner */}
+            {alertFeedback && (
+              <div className="bg-amber-950/60 border border-amber-600/50 rounded-xl p-3 px-4 text-xs text-amber-200 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>{alertFeedback}</span>
+                </div>
+                <button onClick={() => setAlertFeedback(null)} className="text-amber-400 hover:text-white font-bold ml-2">
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Threshold Rules Info Card */}
+            <div className="bg-gradient-to-r from-slate-900 to-slate-850 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Flame className="w-5 h-5 text-orange-400" /> Multi-Group Consolidated Alert Stream
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Formatted strictly according to Section 4 and Section 6 rules. Zero double-counting across overlapping groups.
+                <div className="flex items-center gap-2">
+                  <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold uppercase tracking-wider">
+                    Threshold Milestones
+                  </span>
+                  <h3 className="font-semibold text-white text-sm">Strict Anti-Spam Notification Milestones</h3>
+                </div>
+                <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                  Alerts are strictly suppressed for 1 or 2 wallets to prevent spam. Alerts fire ONLY at:
+                  <strong className="text-amber-300 ml-1">3 Wallets (Milestone 1)</strong>,
+                  <strong className="text-amber-300 ml-1">6 Wallets (Milestone 2)</strong>,
+                  <strong className="text-amber-300 ml-1">10 Wallets (Milestone 3)</strong>, and
+                  <strong className="text-amber-300 ml-1">15 Wallets (Milestone 4)</strong>.
                 </p>
               </div>
-              <div className="flex gap-2">
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {alerts.length > 0 && (
+                  <button
+                    onClick={handleClearAlerts}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800 font-medium flex items-center gap-1.5 transition"
+                    title="Clear alert history and reset milestones"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Clear History
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Simulation Bar with Threshold Milestones */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <Flame className="w-4 h-4 text-orange-400" /> Milestone Alert Simulator
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Test milestone triggering across groups or verify 1-2 wallet suppression.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={() => handleSimulateAlert('mint')}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-medium flex items-center gap-1.5 transition"
+                  onClick={() => handleSimulateAlert('mint', 1)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                  title="Test 1 wallet (will be suppressed)"
                 >
-                  <Flame className="w-3.5 h-3.5" /> Simulate Mint Alert
+                  1 Wallet (Suppressed)
                 </button>
                 <button
-                  onClick={() => handleSimulateAlert('buy')}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 transition"
+                  onClick={() => handleSimulateAlert('mint', 3)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-medium flex items-center gap-1 transition shadow"
+                  title="Trigger Milestone 1 (3 unique wallets)"
                 >
-                  <ShoppingCart className="w-3.5 h-3.5" /> Simulate Buy Alert
+                  <Flame className="w-3 h-3" /> 3 Wallets (M1)
+                </button>
+                <button
+                  onClick={() => handleSimulateAlert('mint', 6)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium flex items-center gap-1 transition shadow"
+                  title="Trigger Milestone 2 (6 unique wallets)"
+                >
+                  <Flame className="w-3 h-3" /> 6 Wallets (M2)
+                </button>
+                <button
+                  onClick={() => handleSimulateAlert('buy', 10)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1 transition shadow"
+                  title="Trigger Milestone 3 (10 unique wallets)"
+                >
+                  <ShoppingCart className="w-3 h-3" /> 10 Wallets (M3)
+                </button>
+                <button
+                  onClick={() => handleSimulateAlert('buy', 15)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-medium flex items-center gap-1 transition shadow"
+                  title="Trigger Milestone 4 (15 unique wallets)"
+                >
+                  <ShoppingCart className="w-3 h-3" /> 15 Wallets (M4)
                 </button>
               </div>
             </div>
@@ -716,20 +805,20 @@ export default function App() {
                 <Flame className="w-12 h-12 text-slate-600 mx-auto mb-3" />
                 <h3 className="text-base font-semibold text-white">No NFT Alerts Generated Yet</h3>
                 <p className="text-xs text-slate-400 max-w-md mx-auto mt-1 mb-4">
-                  When tracked smart money wallets execute mints or confirmed purchases on supported chains, consolidated alerts will stream here and broadcast to Telegram.
+                  When tracked smart money wallets execute mints or confirmed purchases reaching milestone thresholds (3, 6, 10, 15 unique wallets), consolidated alerts will stream here and broadcast to Telegram.
                 </p>
                 <div className="flex justify-center gap-3">
                   <button
-                    onClick={() => handleSimulateAlert('mint')}
+                    onClick={() => handleSimulateAlert('mint', 3)}
                     className="text-xs px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-medium"
                   >
-                    Generate Test Mint Alert
+                    Simulate 3 Wallets Mint Alert (Milestone 1)
                   </button>
                   <button
-                    onClick={() => handleSimulateAlert('buy')}
+                    onClick={() => handleSimulateAlert('buy', 6)}
                     className="text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium"
                   >
-                    Generate Test Buy Alert
+                    Simulate 6 Wallets Buy Alert (Milestone 2)
                   </button>
                 </div>
               </div>
@@ -942,30 +1031,52 @@ export default function App() {
         {/* WALLETS TAB */}
         {currentTab === 'wallets' && (
           <div className="space-y-6">
+            {/* Threshold policy banner in Wallets tab */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center font-bold">
+                  🎯
+                </div>
+                <div>
+                  <div className="text-white font-semibold">Milestone Alerting Policy Active</div>
+                  <div className="text-slate-400 text-[11px]">
+                    Alerts trigger ONLY when <strong className="text-amber-300">3, 6, 10, or 15 unique wallets</strong> across any group mint or buy an NFT. 1 or 2 wallets are suppressed.
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                  Thresholds: 3 → 6 → 10 → 15
+                </span>
+              </div>
+            </div>
+
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-xl p-4">
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
                   <Wallet className="w-5 h-5 text-amber-400" /> Tracked Smart Money Wallets ({wallets.length})
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Organize smart money addresses into groups. One wallet can belong to multiple groups.
+                  Import single wallets or bulk import multiple wallets at once into groups.
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowAddWalletModal(true)}
+                  className="text-xs px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium flex items-center gap-1.5 transition shadow"
+                  title="Add a single wallet address with custom label and groups"
+                >
+                  <Plus className="w-4 h-4" /> Add Single Wallet
+                </button>
                 <button
                   onClick={() => {
                     setBulkTargetGroupId(groups[0]?.id || '');
                     setShowBulkAddModal(true);
                   }}
                   className="text-xs px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium flex items-center gap-1.5 transition shadow"
+                  title="Paste multiple wallet addresses at once into a group"
                 >
-                  <Layers className="w-4 h-4" /> Bulk Add to Group
-                </button>
-                <button
-                  onClick={() => setShowAddWalletModal(true)}
-                  className="text-xs px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium flex items-center gap-1.5 transition shadow"
-                >
-                  <Plus className="w-4 h-4" /> Add Single
+                  <Layers className="w-4 h-4" /> Import Multiple Wallets
                 </button>
                 {wallets.length > 0 && (
                   <button
@@ -982,25 +1093,25 @@ export default function App() {
             {wallets.length === 0 ? (
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
                 <Wallet className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h3 className="text-base font-semibold text-white">No Tracked Wallets</h3>
+                <h3 className="text-base font-semibold text-white">No Tracked Wallets Configured</h3>
                 <p className="text-xs text-slate-400 max-w-md mx-auto mt-1 mb-5">
-                  All pre-programmed wallets have been removed. Add your smart money wallets individually or use Bulk Add to paste multiple addresses into a group at once.
+                  Select your preferred import method below to start tracking smart money:
                 </p>
-                <div className="flex justify-center gap-3">
+                <div className="flex flex-col sm:flex-row justify-center items-center gap-3">
+                  <button
+                    onClick={() => setShowAddWalletModal(true)}
+                    className="w-full sm:w-auto text-xs px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" /> Add Single Wallet
+                  </button>
                   <button
                     onClick={() => {
                       setBulkTargetGroupId(groups[0]?.id || '');
                       setShowBulkAddModal(true);
                     }}
-                    className="text-xs px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium shadow flex items-center gap-1.5"
+                    className="w-full sm:w-auto text-xs px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-semibold rounded-lg shadow flex items-center justify-center gap-2"
                   >
-                    <Layers className="w-4 h-4" /> Bulk Add Wallets to Group
-                  </button>
-                  <button
-                    onClick={() => setShowAddWalletModal(true)}
-                    className="text-xs px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg font-medium shadow flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" /> Add Single Wallet
+                    <Layers className="w-4 h-4" /> Import Multiple Wallets (Bulk)
                   </button>
                 </div>
               </div>
