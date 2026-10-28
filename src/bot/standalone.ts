@@ -5,6 +5,24 @@ import { initDatabase, closeDatabase, getDatabasePath, addLog } from '../server/
 import { setupBot, startBotPolling, stopBotPolling } from '../server/telegram/bot.ts';
 import { monitorService } from '../server/services/monitorService.ts';
 
+process.on('unhandledRejection', (reason: any) => {
+  const msg = reason?.message || String(reason);
+  if (msg.includes('409') || msg.includes('Conflict')) {
+    console.warn('[Telegram] Handled 409 Conflict rejection safely.');
+    return;
+  }
+  console.error('[Process] Unhandled Rejection:', msg);
+});
+
+process.on('uncaughtException', (err: any) => {
+  const msg = err?.message || String(err);
+  if (msg.includes('409') || msg.includes('Conflict')) {
+    console.warn('[Telegram] Handled 409 Conflict exception safely.');
+    return;
+  }
+  console.error('[Process] Uncaught Exception:', err);
+});
+
 async function bootstrap() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('🤖 Starting Telegram NFT Smart Money Alert Bot...');

@@ -984,9 +984,9 @@ export async function startBotPolling(bot: Telegraf, maxRetries: number = 3): Pr
 
   isStartingPolling = true;
 
-  // Reset webhooks before polling to ensure clean state
+  // Reset webhooks before polling to ensure clean state and clear stale pending queues
   try {
-    await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
   } catch (err: any) {
     // Non-fatal if webhook wasn't set
   }
@@ -994,7 +994,7 @@ export async function startBotPolling(bot: Telegraf, maxRetries: number = 3): Pr
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       await bot.launch({
-        dropPendingUpdates: false,
+        dropPendingUpdates: true,
         allowedUpdates: ['message', 'callback_query'],
       });
 
@@ -1011,12 +1011,12 @@ export async function startBotPolling(bot: Telegraf, maxRetries: number = 3): Pr
         console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         console.warn(`⚠️ [Telegram] 409 Conflict (Attempt ${attempt}/${maxRetries}):`);
         console.warn('Another bot instance is currently calling getUpdates for this token,');
-        console.warn('or Telegram is still waiting for a prior long-polling connection to time out (~30s).');
+        console.warn('or Telegram is still waiting for a prior long-polling connection to time out (takes ~30s).');
         console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         addLog('warn', 'telegram', `409 Conflict: waiting for existing getUpdates connection to release (attempt ${attempt}/${maxRetries})`);
 
         if (attempt < maxRetries) {
-          const waitSeconds = 12 * attempt;
+          const waitSeconds = 35; // Telegram's server-side getUpdates timeout is 30s
           console.log(`[Telegram] Waiting ${waitSeconds}s before retrying to allow Telegram servers to release the connection...`);
           await new Promise((resolve) => {
             pollingRetryTimeout = setTimeout(resolve, waitSeconds * 1000);
@@ -1025,9 +1025,11 @@ export async function startBotPolling(bot: Telegraf, maxRetries: number = 3): Pr
           continue;
         } else {
           isStartingPolling = false;
-          console.error('❌ [Telegram] Polling failed after 3 attempts due to 409 Conflict.');
-          console.error('ACTION REQUIRED: If this bot token is running on another server (e.g. your local PC or another host), stop that process or regenerate the bot token via @BotFather.');
-          addLog('error', 'telegram', 'Polling stopped: 409 Conflict persisted. External process must be stopped or token regenerated.');
+          console.error('❌ [Telegram] Polling paused: 409 Conflict persisted after 3 attempts.');
+          console.error('ACTION REQUIRED: An EXTERNAL instance (on another server, PC, or background container) is actively using this bot token.');
+          console.error('Please stop that other process or generate a new bot token via @BotFather in Telegram.');
+          console.log('ℹ️ [Server] Web dashboard, database, and API remain 100% active and healthy.');
+          addLog('error', 'telegram', 'Polling paused: 409 Conflict persisted. External process must be stopped or token regenerated.');
           return false;
         }
       } else {

@@ -19,6 +19,25 @@ if (process.env.DATABASE_PATH && /^\d+$/.test(process.env.DATABASE_PATH.trim()))
   process.env.DATABASE_PATH = './data/bot.db';
 }
 
+// Global process error handlers to prevent unhandled rejection crashes (e.g., transient network/polling drops)
+process.on('unhandledRejection', (reason: any) => {
+  const msg = reason?.message || String(reason);
+  if (msg.includes('409') || msg.includes('Conflict')) {
+    console.warn('[Telegram] Safe recovery: Suppressed unhandled 409 Conflict rejection.');
+    return;
+  }
+  console.error('[Process] Unhandled Rejection:', msg);
+});
+
+process.on('uncaughtException', (err: any) => {
+  const msg = err?.message || String(err);
+  if (msg.includes('409') || msg.includes('Conflict')) {
+    console.warn('[Telegram] Safe recovery: Suppressed 409 Conflict uncaught exception.');
+    return;
+  }
+  console.error('[Process] Uncaught Exception:', err);
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
