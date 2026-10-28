@@ -753,12 +753,14 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
     if (!found.groups?.includes(g.id)) throw new Error('Restored wallet missing group membership');
   });
 
-  // Clean up test db file
+  // Clean up test db files
   closeDatabase();
-  try {
-    if (fs.existsSync(testDbPath)) fs.unlinkSync(testDbPath);
-  } catch {
-    // ignore
+  for (const f of [testDbPath, `${testDbPath}-wal`, `${testDbPath}-shm`]) {
+    try {
+      if (fs.existsSync(f)) fs.unlinkSync(f);
+    } catch {
+      // ignore
+    }
   }
 
   // Restore main DB

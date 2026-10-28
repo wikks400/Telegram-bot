@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exportedAt": 1793189357053,
+  "exportedAt": 1793191460082,
   "groups": [
     {
       "id": "grp_1793098271740_4xx3k",
@@ -33,16 +33,6 @@
       "description": ""
     },
     {
-      "id": "grp_alpha",
-      "name": "Alpha",
-      "description": "Top performing NFT traders and early discoverers"
-    },
-    {
-      "id": "grp_whales",
-      "name": "Whales",
-      "description": "High-volume high-capital liquidity holders"
-    },
-    {
       "id": "grp_1793098271765_9gujn",
       "name": "Bulk Alpha",
       "description": "Bulk testing"
@@ -51,6 +41,16 @@
       "id": "grp_1793098271776_f7kgr",
       "name": "Persistence Test Group",
       "description": "Test Desc"
+    },
+    {
+      "id": "grp_alpha",
+      "name": "Alpha",
+      "description": "Top performing NFT traders and early discoverers"
+    },
+    {
+      "id": "grp_whales",
+      "name": "Whales",
+      "description": "High-volume high-capital liquidity holders"
     }
   ],
   "wallets": [

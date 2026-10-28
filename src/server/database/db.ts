@@ -16,10 +16,17 @@ let currentDbPath: string = '';
 
 export function getDatabasePath(): string {
   const envPath = process.env.DATABASE_PATH;
-  if (!envPath || /^\d+$/.test(envPath.trim())) {
+  if (envPath && !/^\d+$/.test(envPath.trim())) {
+    return envPath.trim();
+  }
+  // Support user's bot.db database on Botkeep
+  if (fs.existsSync('./data/bot.db')) {
+    return './data/bot.db';
+  }
+  if (fs.existsSync('./data/nft_bot.sqlite')) {
     return './data/nft_bot.sqlite';
   }
-  return envPath;
+  return './data/bot.db';
 }
 
 export function initDatabase(dbPath?: string): DatabaseSync {
@@ -30,9 +37,19 @@ export function initDatabase(dbPath?: string): DatabaseSync {
   }
 
   if (targetPath !== ':memory:') {
-    const dir = path.dirname(path.resolve(targetPath));
+    const resolved = path.resolve(targetPath);
+    const dir = path.dirname(resolved);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
+    }
+    // If target is bot.db and doesn't exist yet, but nft_bot.sqlite has data, safely copy it
+    if (path.basename(targetPath) === 'bot.db' && !fs.existsSync(targetPath)) {
+      const fallback = path.join(dir, 'nft_bot.sqlite');
+      if (fs.existsSync(fallback)) {
+        try {
+          fs.copyFileSync(fallback, targetPath);
+        } catch {}
+      }
     }
   }
 
@@ -1074,7 +1091,11 @@ export function getDashboardStats(db = initDatabase()): DashboardStats {
 
 export function closeDatabase(): void {
   if (dbInstance) {
+    try {
+      dbInstance.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    } catch {}
     dbInstance.close();
     dbInstance = null;
+    currentDbPath = '';
   }
 }

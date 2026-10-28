@@ -73,6 +73,9 @@ export function getMainMenuKeyboard() {
 export function buildDashboardMessage(): string {
   const stats = getDashboardStats();
   const botMode = stats.botStatus.mode === 'live' ? '🟢 Live Telegram' : '🟡 Simulator / Standby';
+  const mem = process.memoryUsage();
+  const rssMB = (mem.rss / 1024 / 1024).toFixed(1);
+  const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
 
   return `📊 *NFT SMART MONEY BOT — DASHBOARD*
 
@@ -81,6 +84,7 @@ export function buildDashboardMessage(): string {
 ⛓️ *Chains Supported:* ${stats.supportedChainsCount} (${stats.monitoredChainsCount} actively monitored)
 🔄 *Poll Interval:* ${stats.pollIntervalSeconds}s
 🤖 *Bot Mode:* ${botMode}
+💾 *Server RAM:* ${rssMB} MB RSS (${heapMB} MB heap)
 
 🎯 *Threshold Milestones:* 3, 6, 10, 15 unique wallets (1-2 wallets suppressed)
 
@@ -333,18 +337,53 @@ export function parseBulkWalletsInput(rawText: string): { groupId: string; items
   return { groupId, items };
 }
 
+let activeBotInstance: Telegraf | null = null;
+let activeBotToken: string | null = null;
+let isPollingActive: boolean = false;
+let isStartingPolling: boolean = false;
+let pollingRetryTimeout: NodeJS.Timeout | null = null;
+
+export function getActiveBot(): Telegraf | null {
+  return activeBotInstance;
+}
+
+export function isBotPolling(): boolean {
+  return isPollingActive;
+}
+
 /**
- * Initializes and configures the Telegraf bot instance
+ * Initializes and configures the Telegraf bot instance (Singleton)
  */
 export function setupBot(botToken?: string): Telegraf | null {
-  const token = botToken || process.env.TELEGRAM_BOT_TOKEN;
+  const token = (botToken || process.env.TELEGRAM_BOT_TOKEN || '').trim();
 
-  if (!token || token.includes('example') || token.trim() === '') {
+  if (!token || token.includes('example') || token === '') {
     addLog('info', 'telegram', 'Telegram bot token is not configured or is a placeholder. Bot simulator is enabled for web UI.');
     return null;
   }
 
+  // Prevent duplicate bot instances: reuse existing instance if token is unchanged
+  if (activeBotInstance && activeBotToken === token) {
+    return activeBotInstance;
+  }
+
+  // If a previous instance existed for a different token, stop its polling first
+  if (activeBotInstance && isPollingActive) {
+    try {
+      activeBotInstance.stop('SIGTERM');
+    } catch {}
+    isPollingActive = false;
+  }
+
   const bot = new Telegraf(token);
+  activeBotInstance = bot;
+  activeBotToken = token;
+
+  // Global bot error handler to avoid unhandled rejections
+  bot.catch((err: any, ctx: any) => {
+    console.error(`[Telegram] Bot error in update ${ctx?.update?.update_id || 'unknown'}:`, err?.message || err);
+    addLog('error', 'telegram', `Bot update error: ${err?.message || err}`);
+  });
 
   // Authorization middleware
   bot.use(async (ctx, next) => {
@@ -925,6 +964,104 @@ Alerts trigger ONLY when *3, 6, 10, or 15 unique wallets* mint or buy the same c
   });
 
   return bot;
+}
+
+/**
+ * Starts long-polling for the Telegram bot with single-instance enforcement and 409 Conflict recovery
+ */
+export async function startBotPolling(bot: Telegraf, maxRetries: number = 3): Promise<boolean> {
+  if (!bot) return false;
+
+  if (isPollingActive) {
+    console.log('[Telegram] Bot polling is already actively running (single-instance enforced).');
+    return true;
+  }
+
+  if (isStartingPolling) {
+    console.log('[Telegram] Bot polling is currently starting, skipping duplicate launch call.');
+    return false;
+  }
+
+  isStartingPolling = true;
+
+  // Reset webhooks before polling to ensure clean state
+  try {
+    await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+  } catch (err: any) {
+    // Non-fatal if webhook wasn't set
+  }
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await bot.launch({
+        dropPendingUpdates: false,
+        allowedUpdates: ['message', 'callback_query'],
+      });
+
+      isPollingActive = true;
+      isStartingPolling = false;
+      console.log('✅ [Telegram] Bot started in single-instance polling mode');
+      addLog('info', 'telegram', 'Telegram bot launched successfully in long-polling mode');
+      return true;
+    } catch (err: any) {
+      const errMsg = err?.message || String(err);
+      const is409Conflict = errMsg.includes('409') || err?.response?.error_code === 409;
+
+      if (is409Conflict) {
+        console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.warn(`⚠️ [Telegram] 409 Conflict (Attempt ${attempt}/${maxRetries}):`);
+        console.warn('Another bot instance is currently calling getUpdates for this token,');
+        console.warn('or Telegram is still waiting for a prior long-polling connection to time out (~30s).');
+        console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        addLog('warn', 'telegram', `409 Conflict: waiting for existing getUpdates connection to release (attempt ${attempt}/${maxRetries})`);
+
+        if (attempt < maxRetries) {
+          const waitSeconds = 12 * attempt;
+          console.log(`[Telegram] Waiting ${waitSeconds}s before retrying to allow Telegram servers to release the connection...`);
+          await new Promise((resolve) => {
+            pollingRetryTimeout = setTimeout(resolve, waitSeconds * 1000);
+          });
+          pollingRetryTimeout = null;
+          continue;
+        } else {
+          isStartingPolling = false;
+          console.error('❌ [Telegram] Polling failed after 3 attempts due to 409 Conflict.');
+          console.error('ACTION REQUIRED: If this bot token is running on another server (e.g. your local PC or another host), stop that process or regenerate the bot token via @BotFather.');
+          addLog('error', 'telegram', 'Polling stopped: 409 Conflict persisted. External process must be stopped or token regenerated.');
+          return false;
+        }
+      } else {
+        isStartingPolling = false;
+        console.error('[Telegram] Could not start polling:', errMsg);
+        addLog('error', 'telegram', `Could not start polling: ${errMsg}`);
+        return false;
+      }
+    }
+  }
+
+  isStartingPolling = false;
+  return false;
+}
+
+/**
+ * Cleanly stops polling and releases the Telegram connection
+ */
+export async function stopBotPolling(signal: string = 'SIGTERM'): Promise<void> {
+  if (pollingRetryTimeout) {
+    clearTimeout(pollingRetryTimeout);
+    pollingRetryTimeout = null;
+  }
+
+  if (activeBotInstance && isPollingActive) {
+    try {
+      console.log(`[Telegram] Stopping bot polling cleanly on ${signal}...`);
+      activeBotInstance.stop(signal);
+    } catch (err: any) {
+      console.warn('[Telegram] Note when stopping bot polling:', err.message);
+    }
+    isPollingActive = false;
+  }
+  isStartingPolling = false;
 }
 
 /**

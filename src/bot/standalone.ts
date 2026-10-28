@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { initDatabase, closeDatabase, addLog } from '../server/database/db.ts';
-import { setupBot } from '../server/telegram/bot.ts';
+import { initDatabase, closeDatabase, getDatabasePath, addLog } from '../server/database/db.ts';
+import { setupBot, startBotPolling, stopBotPolling } from '../server/telegram/bot.ts';
 import { monitorService } from '../server/services/monitorService.ts';
 
 async function bootstrap() {
@@ -10,8 +10,7 @@ async function bootstrap() {
   console.log('🤖 Starting Telegram NFT Smart Money Alert Bot...');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  const rawDb = process.env.DATABASE_PATH;
-  const dbPath = (rawDb && !/^\d+$/.test(rawDb.trim())) ? rawDb : './data/nft_bot.sqlite';
+  const dbPath = getDatabasePath();
   console.log(`📁 Initializing persistent SQLite database at: ${dbPath}`);
   initDatabase(dbPath);
 
@@ -27,10 +26,7 @@ async function bootstrap() {
   if (bot) {
     try {
       console.log('🚀 Connecting to Telegram via Long Polling...');
-      await bot.launch(() => {
-        console.log('✅ Telegram bot successfully connected and listening for commands!');
-      });
-      addLog('info', 'telegram', 'Telegram bot launched successfully in long-polling mode');
+      await startBotPolling(bot);
     } catch (err: any) {
       console.error('❌ Failed to launch Telegram bot:', err.message);
       addLog('error', 'telegram', 'Telegram bot launch failed', err.message);
@@ -44,16 +40,10 @@ async function bootstrap() {
   monitorService.start();
 
   // Graceful shutdown handlers
-  const handleShutdown = (signal: string) => {
+  const handleShutdown = async (signal: string) => {
     console.log(`\n🛑 Received ${signal}. Shutting down gracefully...`);
     monitorService.stop();
-    if (bot) {
-      try {
-        bot.stop(signal);
-      } catch (err) {
-        // ignore
-      }
-    }
+    await stopBotPolling(signal);
     closeDatabase();
     console.log('👋 Bot process terminated cleanly. Goodbye.');
     process.exit(0);

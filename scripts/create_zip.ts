@@ -28,6 +28,7 @@ export async function generateProjectZip(outputPath: string = './telegram-nft-sm
       'index.html',
       'metadata.json',
       '.env.example',
+      '.npmrc',
       'README.md',
       'server.ts',
     ];
@@ -38,9 +39,12 @@ export async function generateProjectZip(outputPath: string = './telegram-nft-sm
       }
     }
 
-    // Include directories: src, test, scripts
+    // Include directories: src, test, scripts, and pre-built dist
     if (fs.existsSync('src')) {
       archive.directory('src/', 'src');
+    }
+    if (fs.existsSync('dist')) {
+      archive.directory('dist/', 'dist');
     }
     if (fs.existsSync('test')) {
       archive.directory('test/', 'test');

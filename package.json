@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "postinstall": "npm run build",
     "start": "NODE_ENV=production tsx server.ts",
     "start:bot": "tsx src/bot/standalone.ts",
     "test": "tsx test/run_all_tests.ts",
     "zip": "tsx scripts/create_zip.ts",
     "clean": "rm -rf dist server.js telegram-nft-smart-money-bot.zip",
+    "clean:cache": "npm cache clean --force",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
