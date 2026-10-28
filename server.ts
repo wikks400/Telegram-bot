@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { initDatabase, closeDatabase, addLog } from './src/server/database/db.ts';
 import { setupBot } from './src/server/telegram/bot.ts';
@@ -59,8 +60,17 @@ async function startServer() {
   app.use('/api', apiRouter);
 
   // Dev mode with Vite middleware vs Production static serving
-  const isProd = process.env.NODE_ENV === 'production';
-  if (!isProd) {
+  const distPath = path.resolve(__dirname, 'dist');
+  const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+  const isProd = process.env.NODE_ENV === 'production' || hasDist;
+
+  if (isProd && hasDist) {
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+    console.log('[Express] Serving pre-built static assets from dist/ (Low-RAM Production Mode)');
+  } else {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
@@ -71,13 +81,6 @@ async function startServer() {
     });
     app.use(vite.middlewares);
     console.log('[Vite] Middleware mounted in development mode');
-  } else {
-    const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-    console.log('[Express] Serving static files from dist');
   }
 
   const server = app.listen(PORT, '0.0.0.0', () => {

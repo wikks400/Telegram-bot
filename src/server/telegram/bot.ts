@@ -4,6 +4,7 @@ import {
   createGroup,
   renameGroup,
   deleteGroup,
+  getGroupByIdOrName,
   resolveGroupId,
   getOrCreateGroup,
   getAllWallets,
@@ -148,24 +149,56 @@ export function buildGroupsListMessage(): { text: string; keyboard: any } {
   const groups = getAllGroups();
   let text = `📁 *Wallet Groups (${groups.length})*\n\n`;
 
+  const buttons: any[] = [];
+
   if (groups.length === 0) {
-    text += 'No groups found. Use `/creategroup <name> [description]` to create one.';
+    text += 'No groups found yet. Create your first group to organize your tracked smart money wallets!\n\nUse `/creategroup <name> [description]` or tap below:';
+    buttons.push([Markup.button.callback('➕ Create Your First Group', 'menu_add_group_prompt')]);
   } else {
     groups.forEach((g, idx) => {
-      text += `${idx + 1}. *${g.name}* (ID: \`${g.id}\`)\n`;
-      text += `   👛 Wallets: ${g.wallet_count || 0}\n`;
+      text += `${idx + 1}. *${g.name}*\n`;
+      text += `   👛 Wallets: *${g.wallet_count || 0}*\n`;
       if (g.description) text += `   📝 _${g.description}_\n`;
       text += '\n';
     });
+
+    text += `💡 *Commands:*\n• \`/creategroup <name> [desc]\`\n• \`/delgroup <groupName>\`\n• \`/renamegroup <oldName> <newName>\`\n• \`/groupwallets <groupName>\``;
+
+    buttons.push([
+      Markup.button.callback('➕ Create Group', 'menu_add_group_prompt'),
+      Markup.button.callback('🗑️ Delete a Group', 'menu_delete_group_list'),
+    ]);
   }
 
-  text += `💡 *Commands:*\n• \`/creategroup <name> [desc]\`\n• \`/renamegroup <id> <newName>\`\n• \`/delgroup <id>\`\n• \`/groupwallets <groupId>\``;
+  buttons.push([Markup.button.callback('« Back to Menu', 'menu_main')]);
 
   return {
     text,
-    keyboard: Markup.inlineKeyboard([
-      [Markup.button.callback('« Back to Menu', 'menu_main')],
-    ]),
+    keyboard: Markup.inlineKeyboard(buttons),
+  };
+}
+
+export function buildDeleteGroupSelectionMessage(): { text: string; keyboard: any } {
+  const groups = getAllGroups();
+  if (groups.length === 0) {
+    return {
+      text: 'ℹ️ There are no groups to delete.',
+      keyboard: Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Create Group', 'menu_add_group_prompt')],
+        [Markup.button.callback('« Back to Groups', 'menu_groups')],
+      ]),
+    };
+  }
+
+  const buttons: any[] = [];
+  groups.forEach((g) => {
+    buttons.push([Markup.button.callback(`🗑️ Delete "${g.name}" (${g.wallet_count || 0} wallets)`, `ask_del_grp_${g.id}`)]);
+  });
+  buttons.push([Markup.button.callback('« Cancel & Back to Groups', 'menu_groups')]);
+
+  return {
+    text: `🗑️ *Delete a Wallet Group*\n\nSelect which group to delete below:\n\n🛡️ *Safety Guarantee:*\nDeleting a group *never* deletes your wallets. Wallets are preserved and remain in any other groups they belong to.`,
+    keyboard: Markup.inlineKeyboard(buttons),
   };
 }
 
@@ -598,36 +631,56 @@ export function setupBot(botToken?: string): Telegraf | null {
     }
   });
 
-  // Rename group: /renamegroup <id> <newName>
+  // Rename group: /renamegroup <groupName> <newName>
   bot.command('renamegroup', async (ctx) => {
     const parts = ctx.message.text.trim().split(/\s+/).slice(1);
     if (parts.length < 2) {
-      await ctx.reply('⚠️ Usage: `/renamegroup <groupId> <newName>`', { parse_mode: 'Markdown' });
+      await ctx.reply('⚠️ Usage: `/renamegroup <groupName> <newName>`', { parse_mode: 'Markdown' });
       return;
     }
-    const [id, newName] = parts;
-    const ok = renameGroup(id, newName);
+    const [oldNameOrId, ...rest] = parts;
+    const newName = rest.join(' ');
+    const grp = getGroupByIdOrName(oldNameOrId);
+    if (!grp) {
+      await ctx.reply(`⚠️ Group "${oldNameOrId}" not found. Use \`/groups\` to view all group names.`);
+      return;
+    }
+    const ok = renameGroup(grp.id, newName);
     if (ok) {
-      await ctx.reply(`✅ Group \`${id}\` renamed to *${newName}*.`, { parse_mode: 'Markdown' });
+      await ctx.reply(`✅ Group *${grp.name}* renamed to *${newName}*.`, { parse_mode: 'Markdown' });
     } else {
-      await ctx.reply(`⚠️ Group \`${id}\` not found.`);
+      await ctx.reply(`❌ Failed to rename group.`);
     }
   });
 
-  // Delete group: /delgroup <id>
+  // Delete group: /delgroup [groupName]
   bot.command('delgroup', async (ctx) => {
     const parts = ctx.message.text.trim().split(/\s+/).slice(1);
     if (parts.length === 0) {
-      await ctx.reply('⚠️ Usage: `/delgroup <groupId>`', { parse_mode: 'Markdown' });
+      const { text, keyboard } = buildDeleteGroupSelectionMessage();
+      await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
       return;
     }
-    const id = parts[0];
-    const ok = deleteGroup(id);
-    if (ok) {
-      await ctx.reply(`✅ Group \`${id}\` deleted.`, { parse_mode: 'Markdown' });
-    } else {
-      await ctx.reply(`⚠️ Group \`${id}\` not found.`);
+    const target = parts.join(' ');
+    const grp = getGroupByIdOrName(target);
+    if (!grp) {
+      await ctx.reply(`⚠️ Group *"${target}"* was not found. Use \`/groups\` to view all group names.`, {
+        parse_mode: 'Markdown',
+      });
+      return;
     }
+
+    const text = `⚠️ *Confirm Deletion of Group*\n\nAre you sure you want to delete group *"${grp.name}"*?\n\n• Wallets in group: *${grp.wallet_count || 0}*\n\n🛡️ *Safety Guarantee:* Wallets will NOT be deleted, only unlinked from this group.`;
+
+    await ctx.reply(text, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Confirm Delete', `confirm_del_grp_${grp.id}`),
+          Markup.button.callback('❌ Cancel', 'menu_groups'),
+        ],
+      ]),
+    });
   });
 
   // Add wallet to group: /addtogroup <address> <groupId>
@@ -759,6 +812,66 @@ Alerts trigger ONLY when *3, 6, 10, or 15 unique wallets* mint or buy the same c
   bot.action('menu_groups', async (ctx) => {
     const { text, keyboard } = buildGroupsListMessage();
     await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+  });
+
+  bot.action('menu_delete_group_list', async (ctx) => {
+    const { text, keyboard } = buildDeleteGroupSelectionMessage();
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+  });
+
+  bot.action('menu_add_group_prompt', async (ctx) => {
+    const text = `➕ *Create a New Wallet Group*\n\nTo create a group, send:\n\`/creategroup <name> [description]\`\n\n*Examples:*\n• \`/creategroup Whales Big balance collectors\`\n• \`/creategroup Snipers Fast floor minters\`\n• \`/creategroup Alpha High conviction traders\``;
+    await ctx.reply(text, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback('« Back to Groups', 'menu_groups')]]),
+    });
+  });
+
+  bot.action(/^ask_del_grp_(.+)$/, async (ctx) => {
+    const id = ctx.match[1];
+    const grp = getGroupByIdOrName(id);
+    if (!grp) {
+      await ctx.editMessageText('⚠️ Group not found or already deleted.', {
+        ...Markup.inlineKeyboard([[Markup.button.callback('« Back to Groups', 'menu_groups')]]),
+      });
+      return;
+    }
+
+    const text = `⚠️ *Confirm Deletion of Group*\n\nAre you sure you want to delete group *"${grp.name}"*?\n\n• Wallets currently in group: *${grp.wallet_count || 0}*\n\n🛡️ *Safety Guarantee:*\nDeleting this group will *NOT* delete your wallets. All wallet addresses will remain safely stored.`;
+
+    await ctx.editMessageText(text, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Confirm Delete', `confirm_del_grp_${grp.id}`),
+          Markup.button.callback('❌ Cancel', 'menu_groups'),
+        ],
+      ]),
+    });
+  });
+
+  bot.action(/^confirm_del_grp_(.+)$/, async (ctx) => {
+    const id = ctx.match[1];
+    const grp = getGroupByIdOrName(id);
+    const name = grp ? grp.name : id;
+
+    const ok = deleteGroup(id);
+    if (ok) {
+      await ctx.editMessageText(
+        `✅ *Group Deleted!*\n\nGroup *"${name}"* was removed successfully.\nAll wallets have been preserved and remain in your database.`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📁 View Groups', 'menu_groups')],
+            [Markup.button.callback('« Main Menu', 'menu_main')],
+          ]),
+        }
+      );
+    } else {
+      await ctx.editMessageText(`⚠️ Could not delete group "${name}". It may have already been removed.`, {
+        ...Markup.inlineKeyboard([[Markup.button.callback('« Back to Groups', 'menu_groups')]]),
+      });
+    }
   });
 
   bot.action('menu_recent_mints', async (ctx) => {
@@ -998,7 +1111,34 @@ export function simulateTelegramMessage(userId: number, commandText: string): { 
   if (cmd === '/creategroup') {
     if (parts.length === 0) return { text: '⚠️ Usage: `/creategroup <name> [description]`' };
     const g = createGroup(parts[0], parts.slice(1).join(' '));
-    return { text: `✅ *Group Created!*\n• Name: *${g.name}*\n• ID: \`${g.id}\`\n• Description: _${g.description}_` };
+    return { text: `✅ *Group Created!*\n• Name: *${g.name}*\n• Description: _${g.description}_` };
+  }
+
+  if (cmd === '/delgroup') {
+    if (parts.length === 0) return { text: '⚠️ Usage: `/delgroup <groupName>`\n\n_Example:_\n`/delgroup Whales`' };
+    const target = parts.join(' ');
+    const grp = getGroupByIdOrName(target);
+    if (!grp) return { text: `⚠️ Group "${target}" was not found.` };
+    const ok = deleteGroup(grp.id);
+    return {
+      text: ok
+        ? `✅ Group *"${grp.name}"* deleted successfully.\nAll wallets in this group have been preserved.`
+        : `⚠️ Could not delete group "${grp.name}".`,
+    };
+  }
+
+  if (cmd === '/renamegroup') {
+    if (parts.length < 2) return { text: '⚠️ Usage: `/renamegroup <oldName> <newName>`' };
+    const [oldName, ...rest] = parts;
+    const newName = rest.join(' ');
+    const grp = getGroupByIdOrName(oldName);
+    if (!grp) return { text: `⚠️ Group "${oldName}" was not found.` };
+    const ok = renameGroup(grp.id, newName);
+    return {
+      text: ok
+        ? `✅ Group *"${grp.name}"* renamed to *"${newName}"*.`
+        : `❌ Failed to rename group.`,
+    };
   }
 
   return { text: `Unknown command "${cmd}". Type /help to see all available commands.` };

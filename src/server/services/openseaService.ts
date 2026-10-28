@@ -239,7 +239,7 @@ export class OpenSeaService {
         tx_hash: txHash,
         quantity: Math.max(1, quantity),
         timestamp,
-        raw_data: rawEvent,
+        raw_data: { tokenId: rawEvent.nft?.identifier || rawEvent.token_id },
       };
     }
 
@@ -265,7 +265,7 @@ export class OpenSeaService {
           price_amount: rawEvent.payment?.quantity,
           price_symbol: rawEvent.payment?.symbol,
           timestamp,
-          raw_data: rawEvent,
+          raw_data: { tokenId: rawEvent.nft?.identifier || rawEvent.token_id },
         };
       }
     }
@@ -276,7 +276,7 @@ export class OpenSeaService {
   }
 
   /**
-   * Resilient HTTP fetcher with exponential backoff and rate limit handling
+   * Resilient HTTP fetcher with exponential backoff, rate limit handling, and timeout
    */
   private async fetchWithRetry(url: string, retries: number = 3, delayMs: number = 1000): Promise<any> {
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -284,6 +284,7 @@ export class OpenSeaService {
         const response = await fetch(url, {
           method: 'GET',
           headers: this.getHeaders(),
+          signal: AbortSignal.timeout(8000), // 8-second bounded timeout prevents leaking hung sockets
         });
 
         // Handle Rate Limits (HTTP 429)

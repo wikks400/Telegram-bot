@@ -1,22 +1,7 @@
 {
   "version": 1,
-  "exportedAt": 1793098271778,
+  "exportedAt": 1793189357053,
   "groups": [
-    {
-      "id": "grp_alpha",
-      "name": "Alpha",
-      "description": "Top performing NFT traders and early discoverers"
-    },
-    {
-      "id": "grp_smart_money",
-      "name": "Smart Money",
-      "description": "Algorithmic snipers and consistently profitable collectors"
-    },
-    {
-      "id": "grp_whales",
-      "name": "Whales",
-      "description": "High-volume high-capital liquidity holders"
-    },
     {
       "id": "grp_1793098271740_4xx3k",
       "name": "Test Group A",
@@ -46,6 +31,16 @@
       "id": "grp_1793098271751_sibuv",
       "name": "Stats Whales",
       "description": ""
+    },
+    {
+      "id": "grp_alpha",
+      "name": "Alpha",
+      "description": "Top performing NFT traders and early discoverers"
+    },
+    {
+      "id": "grp_whales",
+      "name": "Whales",
+      "description": "High-volume high-capital liquidity holders"
     },
     {
       "id": "grp_1793098271765_9gujn",

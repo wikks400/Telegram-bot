@@ -44,6 +44,10 @@ export function initDatabase(dbPath?: string): DatabaseSync {
     try {
       db.exec('PRAGMA journal_mode = WAL;');
       db.exec('PRAGMA synchronous = NORMAL;');
+      db.exec('PRAGMA cache_size = -2000;'); // Cap SQLite page cache to ~2MB RAM
+      db.exec('PRAGMA temp_store = MEMORY;');
+      db.exec('PRAGMA mmap_size = 0;'); // Disable mmap to avoid virtual memory bloating
+      db.exec('PRAGMA wal_autocheckpoint = 100;'); // Checkpoint WAL frequently to keep disk usage low
     } catch {}
   }
 
@@ -289,18 +293,16 @@ export function restoreWalletsFromBackup(
 }
 
 function seedInitialData(db: DatabaseSync) {
-  // Check if groups already exist
-  const existingGroups = db.prepare('SELECT COUNT(*) as count FROM groups').get() as { count: number };
-  const now = Date.now();
-
-  if (!existingGroups || existingGroups.count === 0) {
-    const insertGroup = db.prepare(
-      'INSERT INTO groups (id, name, description, created_at, is_enabled) VALUES (?, ?, ?, ?, 1)'
-    );
-    insertGroup.run('grp_alpha', 'Alpha', 'Top performing NFT traders and early discoverers', now);
-    insertGroup.run('grp_whales', 'Whales', 'High-volume high-capital liquidity holders', now);
-    insertGroup.run('grp_smart_money', 'Smart Money', 'Algorithmic snipers and consistently profitable collectors', now);
-  }
+  // Clean up initial auto-created groups if they have 0 wallets so user starts completely clean
+  try {
+    const defaultIds = ['grp_alpha', 'grp_whales', 'grp_smart_money'];
+    for (const gid of defaultIds) {
+      const memberCount = db.prepare('SELECT COUNT(*) as c FROM wallet_group_members WHERE group_id = ?').get(gid) as any;
+      if (memberCount && Number(memberCount.c) === 0) {
+        db.prepare('DELETE FROM groups WHERE id = ?').run(gid);
+      }
+    }
+  } catch {}
 
   // Auto-restore wallets from persistent backup file if database was wiped or freshly mounted
   try {
@@ -337,6 +339,24 @@ export function createGroup(name: string, description: string = '', db = initDat
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Group name cannot be empty');
 
+  // Check if a group with the same name already exists (case-insensitive)
+  const existing = db.prepare('SELECT * FROM groups WHERE LOWER(name) = LOWER(?)').get(trimmed) as any;
+  if (existing) {
+    // Optionally update description if provided
+    if (description.trim() && description.trim() !== (existing.description || '')) {
+      db.prepare('UPDATE groups SET description = ? WHERE id = ?').run(description.trim(), existing.id);
+    }
+    const memberCount = (db.prepare('SELECT COUNT(*) as c FROM wallet_group_members WHERE group_id = ?').get(existing.id) as any)?.c || 0;
+    return {
+      id: existing.id,
+      name: existing.name,
+      description: description.trim() || existing.description || '',
+      created_at: Number(existing.created_at),
+      is_enabled: Number(existing.is_enabled),
+      wallet_count: Number(memberCount),
+    };
+  }
+
   const id = `grp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = Date.now();
 
@@ -357,18 +377,61 @@ export function createGroup(name: string, description: string = '', db = initDat
   };
 }
 
-export function renameGroup(id: string, newName: string, db = initDatabase()): boolean {
+export function renameGroup(idOrName: string, newName: string, db = initDatabase()): boolean {
   const trimmed = newName.trim();
   if (!trimmed) throw new Error('Group name cannot be empty');
 
-  const res = db.prepare('UPDATE groups SET name = ? WHERE id = ?').run(trimmed, id);
-  return (res as any).changes > 0;
+  const resolvedId = resolveGroupId(idOrName, db) || idOrName.trim();
+  const res = db.prepare('UPDATE groups SET name = ? WHERE id = ? OR LOWER(name) = LOWER(?)').run(trimmed, resolvedId, idOrName.trim());
+  const changed = (res as any).changes > 0;
+  if (changed) {
+    saveWalletsBackupToFile(db);
+  }
+  return changed;
 }
 
-export function deleteGroup(id: string, db = initDatabase()): boolean {
-  // Cascading deletes remove memberships automatically
-  const res = db.prepare('DELETE FROM groups WHERE id = ?').run(id);
-  return (res as any).changes > 0;
+/**
+ * Deletes a group by ID or Name.
+ * Guaranteed NOT to delete any wallets (only group memberships are removed).
+ */
+export function deleteGroup(idOrName: string, db = initDatabase()): boolean {
+  if (!idOrName || !idOrName.trim()) return false;
+  const resolvedId = resolveGroupId(idOrName, db) || idOrName.trim();
+
+  // Cascading foreign keys will safely delete memberships without touching wallets
+  const res = db.prepare('DELETE FROM groups WHERE id = ? OR LOWER(name) = LOWER(?)').run(resolvedId, idOrName.trim());
+  const changed = (res as any).changes > 0;
+  if (changed) {
+    saveWalletsBackupToFile(db);
+  }
+  return changed;
+}
+
+/**
+ * Gets a group by its ID or Name
+ */
+export function getGroupByIdOrName(idOrName: string, db = initDatabase()): WalletGroup | null {
+  if (!idOrName) return null;
+  const resolvedId = resolveGroupId(idOrName, db);
+  if (!resolvedId) return null;
+
+  const row = db.prepare(`
+    SELECT g.*, COUNT(m.wallet_address) as wallet_count
+    FROM groups g
+    LEFT JOIN wallet_group_members m ON g.id = m.group_id
+    WHERE g.id = ?
+    GROUP BY g.id
+  `).get(resolvedId) as any;
+
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    created_at: Number(row.created_at),
+    is_enabled: Number(row.is_enabled),
+    wallet_count: Number(row.wallet_count || 0),
+  };
 }
 
 /**
@@ -416,23 +479,23 @@ export function getOrCreateGroup(groupIdOrName: string, db = initDatabase()): Wa
     };
   }
 
-  // Fallback to default group if input is empty or looks like an address
+  // Fallback if input is empty or looks like an address: pick user's first existing group or create group
   const cleanName = groupIdOrName.trim();
   if (!cleanName || validateWalletAddress(cleanName).isValid) {
-    const alphaGroup = db.prepare("SELECT * FROM groups WHERE id = 'grp_alpha' OR LOWER(name) = 'alpha'").get() as any;
-    if (alphaGroup) {
+    const firstGroup = db.prepare('SELECT * FROM groups ORDER BY created_at ASC LIMIT 1').get() as any;
+    if (firstGroup) {
       return {
-        id: alphaGroup.id,
-        name: alphaGroup.name,
-        description: alphaGroup.description || '',
-        created_at: Number(alphaGroup.created_at),
-        is_enabled: Number(alphaGroup.is_enabled),
+        id: firstGroup.id,
+        name: firstGroup.name,
+        description: firstGroup.description || '',
+        created_at: Number(firstGroup.created_at),
+        is_enabled: Number(firstGroup.is_enabled),
         wallet_count: 0,
       };
     }
   }
 
-  return createGroup(cleanName || 'Alpha', 'Auto-created group for tracked wallets', db);
+  return createGroup(cleanName || 'General', 'User tracked wallets group', db);
 }
 
 // Wallet Operations
@@ -890,7 +953,7 @@ export function getAlertHistory(type?: 'mint' | 'buy', limit: number = 20, db = 
   });
 }
 
-// System Logs
+// System Logs with bounded row pruning to conserve disk space
 export function addLog(
   level: 'info' | 'warn' | 'error',
   category: 'opensea' | 'telegram' | 'db' | 'monitor',
@@ -903,8 +966,31 @@ export function addLog(
       INSERT INTO system_logs (level, category, message, details, created_at)
       VALUES (?, ?, ?, ?, ?)
     `).run(level, category, message, details || null, Date.now());
+
+    // Periodically prune logs if exceeding 500 rows to keep disk usage lean
+    if (Math.random() < 0.05) {
+      db.exec(`
+        DELETE FROM system_logs
+        WHERE id NOT IN (
+          SELECT id FROM system_logs ORDER BY created_at DESC LIMIT 500
+        );
+      `);
+    }
   } catch (err) {
     console.error('Failed to write log to db:', err);
+  }
+}
+
+/**
+ * Prunes events older than maxAgeDays to prevent unbounded disk growth
+ */
+export function pruneOldEvents(maxAgeDays: number = 7, db = initDatabase()): number {
+  try {
+    const cutoff = Date.now() - maxAgeDays * 86400000;
+    const res = db.prepare('DELETE FROM processed_events WHERE timestamp < ?').run(cutoff);
+    return (res as any).changes || 0;
+  } catch {
+    return 0;
   }
 }
 

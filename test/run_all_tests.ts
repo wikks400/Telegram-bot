@@ -41,11 +41,14 @@ export interface TestResult {
 
 export async function runAllTests(): Promise<{ results: TestResult[]; summary: { total: number; passed: number; failed: number } }> {
   const results: TestResult[] = [];
+  closeDatabase();
   const testDbPath = './data/test_nft_bot.sqlite';
 
   // Ensure test db starts fresh
-  if (fs.existsSync(testDbPath)) {
-    fs.unlinkSync(testDbPath);
+  for (const f of [testDbPath, `${testDbPath}-wal`, `${testDbPath}-shm`]) {
+    try {
+      if (fs.existsSync(f)) fs.unlinkSync(f);
+    } catch {}
   }
 
   const db = initDatabase(testDbPath);
@@ -72,8 +75,8 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
     return Promise.resolve();
   };
 
-  // 1. Group Management: Create, Rename, Delete
-  await record('Create, rename, and delete groups', 'Groups', () => {
+  // 1. Group Management: Create, Rename, Delete by ID and by Name
+  await record('Create, rename, and delete groups by ID and by Name', 'Groups', () => {
     const groupName = 'DeFi Snipers';
     const group = createGroup(groupName, 'High-conviction snipers', db);
     if (!group.id || group.name !== groupName) throw new Error('Group creation failed');
@@ -84,6 +87,11 @@ export async function runAllTests(): Promise<{ results: TestResult[]; summary: {
     const groups = getAllGroups(db);
     const found = groups.find((g) => g.id === group.id);
     if (!found || found.name !== 'Alpha Snipers') throw new Error('Renamed group not found in DB');
+
+    // Test deleting by name (simplifying user experience)
+    const easyGrp = createGroup('Custom Whale Group', 'A group to delete by name', db);
+    const deletedByName = deleteGroup('Custom Whale Group', db);
+    if (!deletedByName) throw new Error('Failed to delete group by its name');
 
     const deleted = deleteGroup(group.id, db);
     if (!deleted) throw new Error('Group delete failed');
